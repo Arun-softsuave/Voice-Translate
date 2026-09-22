@@ -51,15 +51,19 @@ class RealtimeTranslator:
         self,
         settings: Settings,
         *,
-        source_language: str,
-        target_language: str,
+        source_language: str,          # ISO code, e.g. "ta"
+        target_language: str,          # ISO code, e.g. "hi"
         on_audio: Callable[[str], Awaitable[None]],
         on_speech_started: Callable[[], Awaitable[None]] | None = None,
         label: str = "",
     ) -> None:
         self._settings = settings
+        # Codes on the interface, names in the prompt: this model is told what
+        # to do in English, while the translate backend needs ISO codes.
         self.source_language = source_language
         self.target_language = target_language
+        self.source_name = language_name(source_language)
+        self.target_name = language_name(target_language)
         self._on_audio = on_audio
         self._on_speech_started = on_speech_started
         self.label = label
@@ -106,7 +110,7 @@ class RealtimeTranslator:
                     "type": "realtime",
                     "output_modalities": ["audio"],
                     "instructions": INSTRUCTIONS.format(
-                        source=self.source_language, target=self.target_language
+                        source=self.source_name, target=self.target_name
                     ),
                     "audio": {
                         "input": {
@@ -246,12 +250,14 @@ class RealtimeTranslator:
 
         if etype == "error":
             err = event.get("error", {})
+            # NB: "message" is a reserved LogRecord field — passing it in
+            # `extra` raises KeyError and would kill this read loop.
             log.error(
                 "realtime_error",
                 extra={
                     "label": self.label,
                     "code": err.get("code"),
-                    "message": err.get("message"),
+                    "detail": err.get("message"),
                 },
             )
 

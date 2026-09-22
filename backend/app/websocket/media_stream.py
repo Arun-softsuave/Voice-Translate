@@ -26,8 +26,12 @@ from fastapi import WebSocket, WebSocketDisconnect
 from app.config import get_settings
 from app.models.session import CallStatus, ParticipantId
 from app.services import session_service
-from app.services.realtime_service import RealtimeTranslator, language_name
+from app.services.realtime_service import RealtimeTranslator
 from app.services.session_service import registry
+from app.services.translate_service import TranslateSession
+from app.services.translator import Translator
+from app.utils.audio import b64_decode
+from app.utils.vad import SpeechDetector
 from app.websocket import twilio_protocol as proto
 
 log = logging.getLogger(__name__)
@@ -41,9 +45,15 @@ async def media_stream_endpoint(ws: WebSocket) -> None:
 
     session = None
     pid: ParticipantId | None = None
-    translator: RealtimeTranslator | None = None
+    translator: Translator | None = None
     frames_since_mark = 0
     opened_at = time.monotonic()
+
+    # Barge-in lives here rather than in the translator: the translate endpoint
+    # emits no speech-started event and offers no way to cancel a response, so
+    # detecting interruption ourselves is the only way both backends can behave
+    # the same (design doc §8.2).
+    speech = SpeechDetector()
 
     try:
         while True:
@@ -110,6 +120,14 @@ async def media_stream_endpoint(ws: WebSocket) -> None:
                 if session.status is CallStatus.CONNECTED:
                     session.status = CallStatus.TRANSLATING
 
+                # This speaker starting up interrupts whatever they were being
+                # played, so drop it rather than talking over them.
+                if speech.feed(b64_decode(payload)):
+                    log.debug("barge_in",
+                              extra={"session_id": session.session_id,
+                                     "participant": pid.value})
+                    await session_service.clear_playback(session, pid)
+
                 if translator is not None:
                     # Translated audio comes back asynchronously and is routed
                     # by the callback set up in _open_translator.
@@ -118,13 +136,18 @@ async def media_stream_endpoint(ws: WebSocket) -> None:
                     await session_service.route_audio(
                         session, pid, payload, echo_mode=settings.echo_mode
                     )
-                    frames_since_mark += 1
-                    if frames_since_mark >= MARK_EVERY_FRAMES:
-                        frames_since_mark = 0
-                        target = pid if settings.echo_mode else pid.peer
-                        await session_service.send_mark(
-                            session, target, f"chk-{participant.frames_in}"
-                        )
+
+                # Marks track what has actually been played, which is what
+                # makes clear_playback's accounting meaningful. They belong on
+                # both paths — sending them only on the pass-through path left
+                # played_ms stuck at zero for every translated call.
+                frames_since_mark += 1
+                if frames_since_mark >= MARK_EVERY_FRAMES:
+                    frames_since_mark = 0
+                    target = pid if settings.echo_mode else pid.peer
+                    await session_service.send_mark(
+                        session, target, f"chk-{participant.frames_in}"
+                    )
                 continue
 
             # --- playback accounting (needed for barge-in truncation) ------
@@ -189,6 +212,15 @@ async def media_stream_endpoint(ws: WebSocket) -> None:
             registry.unbind_stream(session, pid)
 
 
+def translator_class(settings):
+    """Pick the translation backend.
+
+    Kept as a function so tests can patch the choice rather than a class name,
+    and so switching backends is one env var rather than a code change.
+    """
+    return TranslateSession if settings.use_translate_backend else RealtimeTranslator
+
+
 async def _open_translator(settings, session, pid: ParticipantId):
     """Start the OpenAI session that translates THIS participant's speech.
 
@@ -215,16 +247,14 @@ async def _open_translator(settings, session, pid: ParticipantId):
             session, pid, audio_b64, echo_mode=settings.echo_mode
         )
 
-    async def on_speech_started() -> None:
-        """The speaker interrupted whatever they were being played."""
-        await session_service.clear_playback(session, pid)
-
-    translator = RealtimeTranslator(
+    backend = translator_class(settings)
+    translator = backend(
         settings,
-        source_language=language_name(speaker.language),
-        target_language=language_name(counterpart.language),
+        # ISO codes, not display names: the translate endpoint needs codes, and
+        # the realtime prompt resolves them to names itself.
+        source_language=speaker.language,
+        target_language=counterpart.language,
         on_audio=deliver,
-        on_speech_started=on_speech_started,
         label=f"{session.session_id[:12]}/{pid.value}",
     )
 
@@ -232,10 +262,17 @@ async def _open_translator(settings, session, pid: ParticipantId):
         await translator.connect()
     except Exception as exc:  # noqa: BLE001
         log.error(
-            "realtime_connect_failed",
+            "translator_connect_failed",
             extra={"session_id": session.session_id, "participant": pid.value,
+                   "backend": backend.__name__, "model": settings.translation_model,
                    "reason": type(exc).__name__, "detail": str(exc)[:200]},
         )
         return None
 
+    log.info(
+        "translator_started",
+        extra={"session_id": session.session_id, "participant": pid.value,
+               "backend": backend.__name__, "model": settings.translation_model,
+               "direction": f"{speaker.language}->{counterpart.language}"},
+    )
     return translator

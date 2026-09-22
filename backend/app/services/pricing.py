@@ -29,6 +29,17 @@ PRICES: dict[str, dict[str, float]] = {
 PRICES["gpt-realtime-2"] = PRICES["gpt-realtime-2.1"]
 PRICES["gpt-realtime-mini"] = PRICES["gpt-realtime-2.1-mini"]
 
+# gpt-realtime-translate bills by audio DURATION, not tokens. Without an entry
+# here, prices_for() would silently fall back to the full token rates and
+# report a cost that is both wrong and plausible-looking.
+PER_MINUTE: dict[str, float] = {
+    "gpt-realtime-translate": 0.034,
+}
+
+
+def is_per_minute(model: str) -> bool:
+    return model in PER_MINUTE
+
 USD_TO_INR = 95.96
 
 
@@ -48,6 +59,10 @@ class Usage:
     text_cached: int = 0
     audio_out: int = 0
     text_out: int = 0
+
+    # Duration-billed models (gpt-realtime-translate) track minutes instead.
+    audio_in_minutes: float = 0.0
+    audio_out_minutes: float = 0.0
 
     def add(self, usage: dict) -> dict:
         """Fold one response.done usage object in. Returns that response's own
@@ -85,6 +100,11 @@ class Usage:
         one["usd"] = self.cost_of(one)
         return one
 
+    def set_audio_minutes(self, minutes_in: float, minutes_out: float) -> None:
+        """Record audio duration for models billed per minute."""
+        self.audio_in_minutes = minutes_in
+        self.audio_out_minutes = minutes_out
+
     def cost_of(self, counts: dict) -> float:
         p = prices_for(self.model)
         return round(
@@ -96,6 +116,10 @@ class Usage:
 
     @property
     def usd(self) -> float:
+        if is_per_minute(self.model):
+            # Billed on audio handled, in whichever direction.
+            return round((self.audio_in_minutes + self.audio_out_minutes)
+                         * PER_MINUTE[self.model], 6)
         return self.cost_of(self.as_counts())
 
     @property
@@ -110,9 +134,19 @@ class Usage:
         }
 
     def summary(self) -> dict:
+        if is_per_minute(self.model):
+            return {
+                "model": self.model,
+                "billing": "per_minute",
+                "audio_in_min": round(self.audio_in_minutes, 3),
+                "audio_out_min": round(self.audio_out_minutes, 3),
+                "usd": self.usd,
+                "inr": self.inr,
+            }
         counts = self.as_counts()
         return {
             "model": self.model,
+            "billing": "per_token",
             "responses": self.responses,
             **counts,
             "total_tokens": sum(counts.values()),

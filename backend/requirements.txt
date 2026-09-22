@@ -6,6 +6,8 @@ pydantic==2.10.4
 twilio==9.4.1
 httpx==0.28.1
 python-multipart==0.0.20
+# resampling between Twilio's 8 kHz ulaw and the translate endpoint's 24 kHz PCM16
+numpy==2.4.6
 
 # dev / test
 pytest==8.3.4

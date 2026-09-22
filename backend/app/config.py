@@ -54,6 +54,10 @@ class Settings:
     # --- OpenAI -----------------------------------------------------------
     openai_api_key: str
     openai_realtime_model: str
+    # "translate" = gpt-realtime-translate (starts translating mid-sentence);
+    # "realtime"  = gpt-realtime-2.1 (conversational model, prompt-constrained)
+    openai_translate_mode: str
+    openai_translate_model: str
 
     # --- URLs -------------------------------------------------------------
     backend_public_url: str         # https://<tunnel>  (no trailing slash)
@@ -66,6 +70,16 @@ class Settings:
     log_level: str
 
     allowed_destination_prefixes: tuple[str, ...] = field(default=("+91",))
+
+    @property
+    def use_translate_backend(self) -> bool:
+        return self.openai_translate_mode == "translate"
+
+    @property
+    def translation_model(self) -> str:
+        """The model actually in use, whichever backend is selected."""
+        return (self.openai_translate_model if self.use_translate_backend
+                else self.openai_realtime_model)
 
     @property
     def translation_enabled(self) -> bool:
@@ -96,6 +110,8 @@ def get_settings() -> Settings:
         twilio_phone_number=_opt("TWILIO_PHONE_NUMBER"),
         openai_api_key=_opt("OPENAI_API_KEY"),          # not needed until phase 7
         openai_realtime_model=_opt("OPENAI_REALTIME_MODEL", "gpt-realtime-2.1"),
+        openai_translate_mode=_opt("OPENAI_TRANSLATE_MODE", "translate").lower(),
+        openai_translate_model=_opt("OPENAI_TRANSLATE_MODEL", "gpt-realtime-translate"),
         backend_public_url=_req("BACKEND_PUBLIC_URL").rstrip("/"),
         frontend_url=_opt("FRONTEND_URL", "http://localhost:5173").rstrip("/"),
         demo_mode=_bool("DEMO_MODE", True),

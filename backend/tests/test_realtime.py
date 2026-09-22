@@ -70,8 +70,8 @@ async def build(patched, **overrides):
 
     translator = RealtimeTranslator(
         get_settings(),
-        source_language=overrides.get("source", "Tamil"),
-        target_language=overrides.get("target", "Hindi"),
+        source_language=overrides.get("source", "ta"),
+        target_language=overrides.get("target", "hi"),
         on_audio=on_audio,
         on_speech_started=on_speech_started,
         label="test/A",
@@ -104,12 +104,14 @@ async def test_session_update_uses_the_ga_shape(patched):
 
 
 @pytest.mark.asyncio
-async def test_instructions_name_both_languages_and_forbid_conversing(patched):
-    translator, _, _ = await build(patched, source="Tamil", target="Hindi")
+async def test_iso_codes_are_resolved_to_names_in_the_prompt(patched):
+    translator, _, _ = await build(patched, source="ta", target="hi")
 
     instructions = patched.of_type("session.update")[0]["session"]["instructions"]
 
+    # The interface carries codes; the prompt must say the English names.
     assert "Tamil" in instructions and "Hindi" in instructions
+    assert "ta" != instructions.strip()[:2]
     assert "interpreter" in instructions.lower()
     assert "never answer" in instructions.lower()
 

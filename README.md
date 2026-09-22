@@ -32,9 +32,9 @@ Browser ──┐                                    ┌── Indian mobile
 | 3. React UI | **done** — setup screen, live call screen, real call states |
 | 4–5. Twilio token + call legs | endpoints done, not exercised against live Twilio |
 | 6. Media Streams | done (audio routes leg-to-leg) |
-| 7. OpenAI translation | **done** — one Realtime session per direction, `audio/pcmu` end to end |
+| 7. OpenAI translation | **done** — two selectable backends, see below |
 | 8–9. Two-way routing | translator output already routes to the peer; needs a second leg to verify |
-| 10. Barge-in | partial — `speech_started` clears the listener's buffered audio |
+| 10. Barge-in | **done** — our own energy VAD, identical across both backends |
 
 ## Prerequisites
 
@@ -123,7 +123,9 @@ Media Stream WebSocket and bidirectional audio injection all at once.
 | `TWILIO_API_KEY` / `TWILIO_API_SECRET` | Signing browser Access Tokens |
 | `TWILIO_TWIML_APP_SID` | TwiML App backing the browser leg |
 | `TWILIO_PHONE_NUMBER` | Caller ID for the PSTN leg — must be non-Indian |
-| `OPENAI_API_KEY` / `OPENAI_REALTIME_MODEL` | Translation (phase 7 onward) |
+| `OPENAI_API_KEY` | Translation |
+| `OPENAI_TRANSLATE_MODE` | `translate` (default) or `realtime` — which backend to use |
+| `OPENAI_TRANSLATE_MODEL` / `OPENAI_REALTIME_MODEL` | Model id for each backend |
 | `BACKEND_PUBLIC_URL` | Public HTTPS tunnel; `wss://` stream URL is derived from it |
 | `FRONTEND_URL` | CORS origin |
 | `DEMO_MODE` | `true` = browser↔browser, no PSTN call, no telephony spend |
@@ -132,6 +134,25 @@ Media Stream WebSocket and bidirectional audio injection all at once.
 
 No secret is ever sent to the browser. The frontend receives only a
 short-lived Access Token.
+
+## Translation backends
+
+Two are supported; switch with one env var and a restart.
+
+| | `translate` (default) | `realtime` |
+|---|---|---|
+| Model | `gpt-realtime-translate` | `gpt-realtime-2.1` |
+| Endpoint | `/v1/realtime/translations` | `/v1/realtime` |
+| Latency | starts translating **mid-sentence** | waits for end of speech + VAD window |
+| Audio | 24 kHz PCM16 (we resample) | µ-law 8 kHz, no conversion |
+| Billing | $0.034 per audio-minute | per token |
+| Tamil output | works, but **not documented** by OpenAI | officially supported |
+
+`translate` is the default because latency is the question this POC exists to
+answer. If its undocumented Tamil support ever regresses, set
+`OPENAI_TRANSLATE_MODE=realtime` and restart — both backends are fully tested.
+
+Compare them on a real call by watching `translation_latency` in the logs.
 
 ## Demo mode vs PSTN
 
