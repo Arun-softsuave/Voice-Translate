@@ -1,0 +1,105 @@
+/* ---------------------------------------------------------------------------
+   Design tokens — Emerald & Antique Gold
+
+   One palette, one spacing scale, one type scale. Components reference these
+   and never hard-code a colour or a pixel value.
+
+   Two rules this palette follows:
+
+   1. Gold appears on ONE important thing per screen. Luxury reads as restraint;
+      an interface covered in gold reads as costume jewellery.
+   2. Depth comes from surface luminance, not borders or heavy shadows. Each
+      layer is roughly 15-20% brighter than the one beneath it.
+
+   Every foreground/background pair here was checked against WCAG 2.2 before
+   being written down. Body text clears 4.5:1, UI and large text clear 3:1, and
+   gold clears 4.5:1 on every surface — so it is safe at small sizes too.
+--------------------------------------------------------------------------- */
+
+:root {
+  /* --- surfaces ---------------------------------------------------------
+     Never pure black: #000 under light text causes halation, where glyphs
+     appear to glow and bleed. These are green-tinted near-blacks.            */
+  --bg: #06130F;
+  --surface: #0C2620;
+  --raised: #113329;
+  --raised-hi: #17402F;
+
+  /* --- gold — the single accent ----------------------------------------- */
+  --gold: #C9A227;
+  --gold-bright: #E3C566;
+  --gold-wash: rgba(201, 162, 39, 0.08);
+  --gold-line: rgba(201, 162, 39, 0.22);
+
+  /* --- ink --------------------------------------------------------------- */
+  --text: #F2EDE1;          /* parchment          16.23:1 on bg */
+  --text-soft: #C6D2C9;     /* secondary          10.25:1 on surface */
+  --text-dim: #8FA79C;      /* tertiary            6.22:1 on surface */
+  --muted: #6B837A;         /* quaternary          3.92:1 on surface */
+
+  /* --- state — warmed to sit inside a green world ------------------------ */
+  --live: #6FCF97;
+  --wait: #E0B252;
+  --error: #D98878;
+
+  /* --- lines ------------------------------------------------------------- */
+  --line: rgba(242, 237, 225, 0.07);
+  --line-strong: rgba(242, 237, 225, 0.13);
+
+  /* --- shadow ------------------------------------------------------------- */
+  --shadow-lg: 0 24px 64px -16px rgba(0, 0, 0, 0.75);
+  --glow-gold: 0 0 0 1px var(--gold-line), 0 12px 40px -14px rgba(201, 162, 39, 0.45);
+
+  /* --- type --------------------------------------------------------------
+     Instrument Serif ships in ONE weight (400) plus italic — confirmed
+     against the Google Fonts API, where wght@700 returns HTTP 400. So
+     emphasis here comes from size, italic, colour and tracking, never weight.
+     It is a display face: strong above 2rem, weak below ~1.2rem, which is why
+     small labels stay in Inter.                                             */
+  --font-display: 'Instrument Serif', 'Iowan Old Style', Georgia, serif;
+  --font-ui: 'Inter', -apple-system, 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'SF Mono', 'Cascadia Mono', Consolas, monospace;
+
+  /* clamp rather than media-query steps, so the serif never overflows */
+  --t-display: clamp(2.6rem, 1.2rem + 3.4vw, 4.6rem);
+  --t-md: 0.9375rem;
+  --t-sm: 0.8125rem;
+  --t-xs: 0.6875rem;
+
+  --track-wide: 0.18em;
+  --track-mid: 0.08em;
+
+  /* --- space (4px base) --------------------------------------------------- */
+  --s1: 0.25rem;
+  --s2: 0.5rem;
+  --s3: 0.75rem;
+  --s4: 1rem;
+  --s5: 1.5rem;
+  --s6: 2rem;
+  --s7: 2.75rem;
+
+  /* --- geometry ----------------------------------------------------------- */
+  --r-md: 12px;
+  --r-lg: 18px;
+  --r-full: 999px;
+
+  /* --- measure ------------------------------------------------------------ */
+  --measure-form: 440px;
+  --measure-stage: 880px;
+
+  /* --- motion -------------------------------------------------------------- */
+  --ease: cubic-bezier(0.32, 0.72, 0, 1);
+  --fast: 140ms;
+  --base: 260ms;
+  --slow: 520ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

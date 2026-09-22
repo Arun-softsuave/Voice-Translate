@@ -1,0 +1,695 @@
+@import './tokens.css';
+
+/* ---------------------------------------------------------------------------
+   Reset
+--------------------------------------------------------------------------- */
+*,
+*::before,
+*::after { box-sizing: border-box; }
+
+html, body, #root { height: 100%; }
+
+body {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: var(--t-md);
+  line-height: 1.55;
+  color: var(--text-soft);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+button, input, select { font: inherit; color: inherit; }
+button { cursor: pointer; border: none; background: none; }
+:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; border-radius: 4px; }
+::selection { background: rgba(201, 162, 39, 0.3); color: var(--text); }
+
+/* Ambient wash lives on a fixed layer behind everything. It must not
+   participate in layout — an inset negative pseudo-element on a full-screen
+   container extends the scroll height and creates phantom scrollbars. */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(52% 44% at 18% 8%, rgba(23, 74, 58, 0.55), transparent 72%),
+    radial-gradient(40% 38% at 88% 92%, rgba(201, 162, 39, 0.06), transparent 74%);
+  transition: opacity var(--slow) var(--ease);
+}
+
+/* ---------------------------------------------------------------------------
+   Shell
+
+   min-block-size with svh, never height: a fixed height clips content on
+   short viewports (landscape phones, 200% zoom, 1024x600 laptops) with no way
+   to scroll out of it. svh is the stable small-viewport unit, so the layout
+   does not resize as mobile browser toolbars appear.
+--------------------------------------------------------------------------- */
+.shell {
+  min-block-size: 100svh;
+  display: grid;
+  justify-items: stretch;
+  align-items: stretch;
+  overflow-x: clip;
+}
+
+/* ---------------------------------------------------------------------------
+   Typography
+--------------------------------------------------------------------------- */
+.eyebrow {
+  font-size: var(--t-xs);
+  letter-spacing: var(--track-wide);
+  text-transform: uppercase;
+  color: var(--gold);
+  font-weight: 500;
+  margin: 0 0 var(--s4);
+}
+
+.display {
+  font-family: var(--font-display);
+  font-size: var(--t-display);
+  font-weight: 400;              /* Instrument Serif has exactly one weight */
+  line-height: 1.02;
+  letter-spacing: -0.02em;
+  color: var(--text);
+  margin: 0 0 var(--s4);
+  max-width: 16ch;
+  text-wrap: balance;
+}
+
+.display em {
+  font-style: italic;
+  color: var(--gold-bright);
+}
+
+.lede {
+  font-size: var(--t-md);
+  color: var(--text-dim);
+  margin: 0;
+  max-width: 34ch;
+}
+
+.rule {
+  height: 1px;
+  background: linear-gradient(90deg, var(--gold-line), transparent);
+  border: 0;
+  margin: var(--s5) 0;
+}
+
+.footnote {
+  margin: var(--s5) 0 0;
+  font-size: var(--t-xs);
+  color: var(--muted);
+}
+
+/* ---------------------------------------------------------------------------
+   Setup screen — editorial split.
+
+   Full screen does not mean the form gets wider. The left column fills the
+   viewport; the controls stay at a tight, usable measure.
+--------------------------------------------------------------------------- */
+.setup {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+  min-block-size: 100svh;
+}
+
+.setup__brand {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: clamp(2rem, 6vh, 5rem) clamp(1.5rem, 5vw, 5rem);
+}
+
+.setup__mark {
+  margin-top: auto;
+  padding-top: var(--s6);
+  font-size: var(--t-xs);
+  letter-spacing: var(--track-mid);
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.setup__form {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: clamp(2rem, 6vh, 5rem) clamp(1.5rem, 4vw, 4rem);
+  background: var(--surface);
+  border-left: 1px solid var(--gold-line);
+}
+
+.setup__inner {
+  width: 100%;
+  max-width: var(--measure-form);
+  margin: 0 auto;
+}
+
+/* ---------------------------------------------------------------------------
+   Fields
+--------------------------------------------------------------------------- */
+.field { display: block; margin-bottom: var(--s4); }
+
+.field__label {
+  display: block;
+  font-size: var(--t-xs);
+  letter-spacing: var(--track-mid);
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: var(--s2);
+  font-weight: 500;
+}
+
+.control {
+  width: 100%;
+  background: var(--raised);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  padding: 0.85rem 1rem;
+  color: var(--text);
+  transition: border-color var(--fast) var(--ease),
+              background var(--fast) var(--ease);
+}
+
+.control:hover:not(:disabled) { background: var(--raised-hi); }
+
+.control:focus {
+  outline: none;
+  border-color: var(--gold-line);
+  background: var(--raised-hi);
+}
+
+.control:disabled { opacity: 0.45; cursor: not-allowed; }
+.control--invalid { border-color: rgba(217, 136, 120, 0.5); }
+
+select.control {
+  appearance: none;
+  cursor: pointer;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--gold) 50%),
+    linear-gradient(135deg, var(--gold) 50%, transparent 50%);
+  background-position: calc(100% - 18px) 50%, calc(100% - 12px) 50%;
+  background-size: 6px 6px, 6px 6px;
+  background-repeat: no-repeat;
+  padding-right: 2.4rem;
+}
+
+select.control option { background: var(--raised); color: var(--text); }
+
+.field__hint {
+  font-size: var(--t-xs);
+  color: var(--muted);
+  margin-top: var(--s2);
+}
+
+.field__hint--error { color: var(--error); }
+
+/* ---------------------------------------------------------------------------
+   Language pair
+--------------------------------------------------------------------------- */
+.pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: var(--s3);
+  align-items: end;
+}
+
+.pair__swap {
+  width: 38px; height: 38px;
+  margin-bottom: 6px;
+  border-radius: var(--r-full);
+  border: 1px solid var(--line-strong);
+  background: var(--raised);
+  color: var(--gold);
+  display: grid;
+  place-items: center;
+  transition: transform var(--base) var(--ease), border-color var(--fast) var(--ease);
+}
+
+.pair__swap:hover {
+  border-color: var(--gold-line);
+  transform: rotate(180deg);
+}
+
+/* ---------------------------------------------------------------------------
+   Buttons
+--------------------------------------------------------------------------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s2);
+  border-radius: var(--r-full);
+  font-size: var(--t-md);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  padding: 0.85rem 1.6rem;
+  transition: transform var(--fast) var(--ease),
+              box-shadow var(--base) var(--ease),
+              background var(--fast) var(--ease),
+              border-color var(--fast) var(--ease),
+              opacity var(--fast) var(--ease);
+}
+
+.btn:active:not(:disabled) { transform: translateY(1px); }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.btn--primary {
+  width: 100%;
+  padding: 1.05rem 1.6rem;
+  background: linear-gradient(145deg, var(--gold-bright), var(--gold));
+  color: var(--bg);
+  font-weight: 600;
+  box-shadow: var(--glow-gold);
+}
+
+.btn--primary:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 0 0 1px var(--gold), 0 18px 48px -14px rgba(201, 162, 39, 0.55);
+}
+
+.btn--ghost {
+  background: var(--raised);
+  border: 1px solid var(--line-strong);
+  color: var(--text-soft);
+}
+
+.btn--ghost:hover:not(:disabled) {
+  border-color: var(--gold-line);
+  background: var(--raised-hi);
+  color: var(--text);
+}
+
+.btn--danger {
+  background: rgba(217, 136, 120, 0.1);
+  border: 1px solid rgba(217, 136, 120, 0.32);
+  color: #E9A99D;
+}
+
+.btn--danger:hover:not(:disabled) {
+  background: rgba(217, 136, 120, 0.18);
+  border-color: rgba(217, 136, 120, 0.5);
+}
+
+.btn--on {
+  background: var(--gold-wash);
+  border-color: var(--gold-line);
+  color: var(--gold-bright);
+}
+
+/* ---------------------------------------------------------------------------
+   Status
+--------------------------------------------------------------------------- */
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  font-size: var(--t-xs);
+  letter-spacing: var(--track-mid);
+  text-transform: uppercase;
+  color: var(--text-dim);
+  font-weight: 500;
+}
+
+.dot {
+  width: 7px; height: 7px;
+  border-radius: var(--r-full);
+  background: var(--muted);
+  flex: none;
+}
+
+.dot--live  { background: var(--live);  box-shadow: 0 0 0 3px rgba(111, 207, 151, 0.16); }
+.dot--wait  { background: var(--wait);  animation: pulse 1.8s var(--ease) infinite; }
+.dot--error { background: var(--error); box-shadow: 0 0 0 3px rgba(217, 136, 120, 0.16); }
+.dot--idle  { background: var(--muted); }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1;   box-shadow: 0 0 0 0 rgba(224, 178, 82, 0.4); }
+  50%      { opacity: 0.6; box-shadow: 0 0 0 6px rgba(224, 178, 82, 0); }
+}
+
+/* ---------------------------------------------------------------------------
+   Call screen — rail / stage / rail
+
+   The organising idea: the bridge is the midline of the stage and the two
+   parties are mirrored across it. Mobile keeps that axis vertical; desktop
+   rotates it to horizontal. One mental model, two orientations — and it is
+   what lets the screen fill a large monitor without inventing filler.
+--------------------------------------------------------------------------- */
+.call {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-block-size: 100svh;
+}
+
+.call__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s4);
+  padding: var(--s4) clamp(1.25rem, 4vw, 3rem);
+  background: var(--surface);
+  border-bottom: 1px solid var(--gold-line);
+}
+
+.call__timer {
+  font-family: var(--font-mono);
+  font-size: clamp(0.9rem, 0.7rem + 0.6vw, 1.4rem);
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.call__stage {
+  display: grid;
+  place-items: center;
+  padding: clamp(1.25rem, 3vh, 3rem) clamp(1.25rem, 4vw, 3rem);
+  min-block-size: 0;
+}
+
+/* Vertical axis by default: the two parties spread symmetrically about the
+   seam instead of clumping at the top. minmax(0,…) throughout — a bare 1fr
+   defaults to min-width:auto and long names like "Malayalam" blow the track. */
+.parties {
+  width: 100%;
+  max-width: var(--measure-stage);
+  height: 100%;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: stretch;
+}
+
+.party {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  gap: var(--s3);
+  padding: clamp(1rem, 3vh, 2.5rem) var(--s4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  transition: border-color var(--base) var(--ease), background var(--base) var(--ease);
+}
+
+/* Active state fills the pane rather than tinting a border — at this scale
+   the speaking indicator should be ambient, not a detail. */
+.party--active {
+  border-color: var(--gold-line);
+  background:
+    radial-gradient(62% 56% at 50% 50%, var(--gold-wash), transparent 72%),
+    var(--raised);
+}
+
+.party__badge {
+  width: 52px; height: 52px;
+  flex: none;
+  border-radius: var(--r-full);
+  display: grid;
+  place-items: center;
+  font-family: var(--font-display);
+  font-size: 1.6rem;
+  color: var(--gold-bright);
+  background: var(--raised);
+  border: 1px solid var(--gold-line);
+}
+
+.party__who {
+  display: block;
+  font-size: var(--t-xs);
+  letter-spacing: var(--track-mid);
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 2px;
+}
+
+/* The hero of the screen. */
+.party__lang {
+  display: block;
+  font-family: var(--font-display);
+  font-size: clamp(1.5rem, 1rem + 2.4vw, 3.5rem);
+  font-weight: 400;
+  letter-spacing: -0.015em;
+  color: var(--text);
+  line-height: 1.08;
+  overflow-wrap: break-word;
+}
+
+/* Fixed box: this slot swaps between a Meter and a Status pill, and at pane
+   scale an unreserved height change makes the whole pane jump. */
+.party__meta {
+  display: grid;
+  place-items: center;
+  min-height: 34px;
+}
+
+/* --- the seam ------------------------------------------------------------ */
+.bridge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s4);
+  padding: var(--s4) var(--s5);
+  color: var(--text-dim);
+  font-size: var(--t-xs);
+  letter-spacing: var(--track-wide);
+  text-transform: uppercase;
+}
+
+.bridge__line {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--line-strong), transparent);
+}
+
+.bridge__label { white-space: nowrap; }
+
+.bridge--active .bridge__label { color: var(--gold-bright); }
+
+.bridge--active .bridge__line {
+  background: linear-gradient(90deg, transparent, var(--gold), transparent);
+  background-size: 200% 100%;
+  animation: flow-x 2.4s linear infinite;
+}
+
+@keyframes flow-x {
+  from { background-position: 200% 0; }
+  to   { background-position: -200% 0; }
+}
+
+@keyframes flow-y {
+  from { background-position: 0 200%; }
+  to   { background-position: 0 -200%; }
+}
+
+/* --- audio meter ---------------------------------------------------------
+   Meter bar heights are set inline from the live audio level, so a stylesheet
+   height would never win. Scale the whole component instead — the inline
+   formula stays authoritative. */
+.meter {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 20px;
+  transform: scale(var(--meter-scale, 1));
+  transform-origin: center;
+}
+
+.meter__bar {
+  width: 3px;
+  border-radius: 2px;
+  background: var(--gold);
+  opacity: 0.3;
+  transition: height 90ms linear, opacity 90ms linear;
+}
+
+.meter__bar--on { opacity: 1; }
+
+/* --- bottom bar ---------------------------------------------------------- */
+.call__foot {
+  background: var(--surface);
+  border-top: 1px solid var(--gold-line);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* Live telemetry, not a card grid. It reads as instrumentation, which suits
+   the product, and it gives the bottom band substance. */
+.diag {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2) var(--s5);
+  padding: var(--s3) clamp(1.25rem, 4vw, 3rem);
+  border-bottom: 1px solid var(--line);
+  font-size: var(--t-xs);
+  font-family: var(--font-mono);
+  color: var(--muted);
+}
+
+.diag__item { display: inline-flex; align-items: baseline; gap: var(--s2); }
+.diag__k { letter-spacing: var(--track-mid); text-transform: uppercase; }
+.diag__v { color: var(--text-soft); }
+
+.controls {
+  display: flex;
+  gap: var(--s3);
+  padding: var(--s4) clamp(1.25rem, 4vw, 3rem);
+  max-width: 520px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.controls .btn { flex: 1; }
+
+/* ---------------------------------------------------------------------------
+   Toast — offset above the control bar so it never covers "End call".
+
+   The toast is position:fixed and lives outside .call, so --foot-h has to be
+   set on a scope that reaches both. body:has() is that scope.
+--------------------------------------------------------------------------- */
+body:has(.call) { --foot-h: 128px; }
+
+@media (max-width: 767px) {
+  body:has(.call) { --foot-h: 148px; }
+}
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--s5) + var(--foot-h, 0px) + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  max-width: min(440px, calc(100vw - 2rem));
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s3);
+  padding: var(--s3) var(--s4);
+  background: var(--raised);
+  border: 1px solid var(--line-strong);
+  border-left: 2px solid var(--error);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-lg);
+  color: var(--text);
+  font-size: var(--t-sm);
+  animation: rise var(--base) var(--ease);
+  z-index: 50;
+}
+
+.toast--error { border-left-color: var(--error); }
+.toast--info  { border-left-color: var(--gold); }
+
+.toast__close {
+  color: var(--text-dim);
+  padding: 0 var(--s1);
+  line-height: 1;
+  font-size: 1.1rem;
+}
+
+.toast__close:hover { color: var(--text); }
+
+@keyframes rise {
+  from { opacity: 0; transform: translate(-50%, 8px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
+
+/* ---------------------------------------------------------------------------
+   Loading
+--------------------------------------------------------------------------- */
+.booting {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: clamp(2rem, 6vh, 5rem) clamp(1.5rem, 5vw, 5rem);
+}
+
+/* ---------------------------------------------------------------------------
+   Entry transition — applied to regions, not to viewport-sized elements
+--------------------------------------------------------------------------- */
+.enter { animation: enter var(--slow) var(--ease) both; }
+.enter:nth-child(2) { animation-delay: 70ms; }
+
+@keyframes enter {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* ---------------------------------------------------------------------------
+   Desktop — rotate the seam to horizontal
+--------------------------------------------------------------------------- */
+@media (min-width: 900px) {
+  :root { --meter-scale: 1.6; }
+
+  .parties {
+    grid-template-rows: none;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    align-items: stretch;
+  }
+
+  .party { padding: clamp(2rem, 5vh, 4rem) clamp(1.5rem, 3vw, 3rem); }
+
+  .party__badge { width: 56px; height: 56px; font-size: 1.75rem; }
+
+  .bridge {
+    flex-direction: column;
+    width: clamp(88px, 8vw, 150px);
+    padding: var(--s5) var(--s3);
+  }
+
+  .bridge__line {
+    width: 1px;
+    height: auto;
+    flex: 1;
+    background: linear-gradient(180deg, transparent, var(--line-strong), transparent);
+  }
+
+  .bridge--active .bridge__line {
+    background: linear-gradient(180deg, transparent, var(--gold), transparent);
+    background-size: 100% 200%;
+    animation: flow-y 2.4s linear infinite;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Tablet
+--------------------------------------------------------------------------- */
+@media (max-width: 1023px) {
+  .setup { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+}
+
+/* ---------------------------------------------------------------------------
+   Mobile — one column. Nothing is hidden; everything stacks.
+--------------------------------------------------------------------------- */
+@media (max-width: 767px) {
+  .setup {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+  }
+
+  .setup__brand { padding: var(--s7) var(--s5) var(--s5); }
+  .setup__mark { display: none; }
+
+  .setup__form {
+    border-left: none;
+    border-top: 1px solid var(--gold-line);
+  }
+
+  .pair { grid-template-columns: 1fr; }
+  .pair__swap { justify-self: center; margin: 0 0 var(--s2); }
+
+  .party { padding: var(--s4); gap: var(--s2); }
+  .party__badge { width: 44px; height: 44px; font-size: 1.35rem; }
+  .bridge { padding: var(--s3) var(--s2); gap: var(--s3); }
+}
+
+/* ---------------------------------------------------------------------------
+   Short viewports — landscape phones, small laptops, 200% zoom.
+   Release the vertical clamps and let the page scroll rather than clip.
+--------------------------------------------------------------------------- */
+@media (max-height: 640px) {
+  .setup, .call, .shell { min-block-size: auto; }
+  .setup__brand, .setup__form, .booting { padding-block: var(--s5); }
+  .call__stage { padding-block: var(--s4); }
+  .party { padding-block: var(--s3); }
+}
