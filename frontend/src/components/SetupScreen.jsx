@@ -1,14 +1,30 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
-import { LANGUAGES } from '../lib/languages'
+import { allows, firstCode } from '../lib/languages'
 import { format, normalise, validationMessage } from '../lib/phone'
 import { Button, Field, Input, Select } from './ui'
 
-export function SetupScreen({ onStart, busy, demoMode }) {
-  const [source, setSource] = useState('ta')
-  const [target, setTarget] = useState('hi')
+/**
+ * `sources` and `targets` come from the backend and are NOT the same list.
+ * The translate model hears far more languages than it can speak, so a target
+ * the model cannot produce must never be selectable.
+ */
+export function SetupScreen({ onStart, busy, demoMode, sources, targets }) {
+  const [source, setSource] = useState(() => firstCode(sources, 'ta'))
+  const [target, setTarget] = useState(
+    () => targets.find((l) => l.code !== firstCode(sources))?.code
+          ?? firstCode(targets, 'hi'),
+  )
   const [phone, setPhone] = useState('+91')
   const [touched, setTouched] = useState(false)
+
+  // If the lists change under us — switching translation backend does exactly
+  // that — a previously valid choice can become unavailable. Fall back rather
+  // than leave a selection the server would reject.
+  useEffect(() => {
+    if (!allows(sources, source)) setSource(firstCode(sources, source))
+    if (!allows(targets, target)) setTarget(firstCode(targets, target))
+  }, [sources, targets, source, target])
 
   const phoneError = useMemo(() => {
     if (demoMode) return null
@@ -19,7 +35,14 @@ export function SetupScreen({ onStart, busy, demoMode }) {
   const canStart =
     !busy && !sameLanguage && (demoMode || validationMessage(phone) === null)
 
+  // Swapping is only meaningful when the reversed pair is actually offered.
+  // With asymmetric lists the reverse may not exist — e.g. Telugu can be
+  // spoken but not produced — so the control is disabled rather than silently
+  // creating a pair the backend will reject.
+  const canSwap = allows(sources, target) && allows(targets, source)
+
   const swap = () => {
+    if (!canSwap) return
     setSource(target)
     setTarget(source)
   }
@@ -35,6 +58,12 @@ export function SetupScreen({ onStart, busy, demoMode }) {
       phoneNumber: demoMode ? null : normalise(phone),
     })
   }
+
+  const option = (l) => (
+    <option key={l.code} value={l.code}>
+      {l.label} — {l.native}
+    </option>
+  )
 
   // The <form> stays the outermost element and still contains every control,
   // so Enter-to-submit is structurally untouched by the split layout.
@@ -63,11 +92,7 @@ export function SetupScreen({ onStart, busy, demoMode }) {
                 disabled={busy}
                 onChange={(e) => setSource(e.target.value)}
               >
-                {LANGUAGES.map((l) => (
-                  <option key={l.code} value={l.code}>
-                    {l.label} — {l.native}
-                  </option>
-                ))}
+                {sources.map(option)}
               </Select>
             </Field>
 
@@ -75,9 +100,11 @@ export function SetupScreen({ onStart, busy, demoMode }) {
               type="button"
               className="pair__swap"
               onClick={swap}
-              disabled={busy}
+              disabled={busy || !canSwap}
               aria-label="Swap languages"
-              title="Swap languages"
+              title={canSwap
+                ? 'Swap languages'
+                : 'This pair cannot be reversed on the current model'}
             >
               ⇄
             </button>
@@ -94,11 +121,7 @@ export function SetupScreen({ onStart, busy, demoMode }) {
                 invalid={sameLanguage}
                 onChange={(e) => setTarget(e.target.value)}
               >
-                {LANGUAGES.map((l) => (
-                  <option key={l.code} value={l.code}>
-                    {l.label} — {l.native}
-                  </option>
-                ))}
+                {targets.map(option)}
               </Select>
             </Field>
           </div>

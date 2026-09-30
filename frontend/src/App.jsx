@@ -10,16 +10,23 @@ import { State } from './lib/callState'
 export default function App() {
   const call = useCall()
   const [demoMode, setDemoMode] = useState(null)
+  // The backend decides which languages are offered, and the two directions
+  // differ on the translate model. null = not known yet.
+  const [languages, setLanguages] = useState(null)
   const [notice, setNotice] = useState(null)
-  const request = useRef({ source: 'ta', target: 'hi', phone: null })
+  const request = useRef({ source: null, target: null, phone: null })
 
   // The backend decides whether this is a demo run; the UI must not guess.
   useEffect(() => {
     api
       .health()
-      .then((h) => setDemoMode(Boolean(h.demo_mode)))
+      .then((h) => {
+        setDemoMode(Boolean(h.demo_mode))
+        setLanguages(h.languages ?? { source: [], target: [] })
+      })
       .catch(() => {
         setDemoMode(false)
+        setLanguages({ source: [], target: [] })
         setNotice('Cannot reach the backend. Start it on port 8000 and reload.')
       })
   }, [])
@@ -35,9 +42,10 @@ export default function App() {
 
   const onSetupScreen = call.state === State.IDLE
 
-  // Until /health answers we do not know whether a phone number is required,
-  // so we hold the screen rather than show the wrong form and swap it.
-  if (demoMode === null) {
+  // Until /health answers we know neither whether a phone number is required
+  // nor which languages are offered, so we hold the screen rather than show
+  // the wrong form and swap it.
+  if (demoMode === null || languages === null) {
     return (
       <main className="shell">
         <div className="booting">
@@ -51,7 +59,13 @@ export default function App() {
   return (
     <main className="shell">
       {onSetupScreen ? (
-        <SetupScreen onStart={handleStart} busy={false} demoMode={demoMode} />
+        <SetupScreen
+          onStart={handleStart}
+          busy={false}
+          demoMode={demoMode}
+          sources={languages.source}
+          targets={languages.target}
+        />
       ) : (
         <CallScreen
           state={call.state}
@@ -61,6 +75,7 @@ export default function App() {
           muted={call.muted}
           source={request.current.source}
           target={request.current.target}
+          catalogue={languages.source}
           phoneNumber={request.current.phone}
           demoMode={demoMode}
           onHangUp={call.hangUp}

@@ -267,6 +267,6 @@ class RealtimeTranslator:
 
 
 def language_name(code: str) -> str:
-    from app.schemas.call import SUPPORTED_LANGUAGES
+    from app.services.languages import name_of
 
-    return SUPPORTED_LANGUAGES.get(code, code)
+    return name_of(code)

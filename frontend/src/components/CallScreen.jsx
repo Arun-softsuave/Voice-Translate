@@ -19,6 +19,7 @@ export function CallScreen({
   target,
   phoneNumber,
   demoMode,
+  catalogue = [],
   onHangUp,
   onToggleMute,
   onReset,
@@ -44,7 +45,7 @@ export function CallScreen({
             <span className="party__badge">1</span>
             <span>
               <span className="party__who">You</span>
-              <span className="party__lang">{labelOf(source)}</span>
+              <span className="party__lang">{labelOf(source, catalogue)}</span>
             </span>
             <span className="party__meta">
               {muted ? (
@@ -69,7 +70,7 @@ export function CallScreen({
               <span className="party__who">
                 {demoMode ? 'Second browser' : format(phoneNumber ?? '')}
               </span>
-              <span className="party__lang">{labelOf(target)}</span>
+              <span className="party__lang">{labelOf(target, catalogue)}</span>
             </span>
             <span className="party__meta">
               {b?.connected ? (
@@ -90,7 +91,7 @@ export function CallScreen({
             <span className="diag__item">
               <span className="diag__k">Direction</span>
               <span className="diag__v">
-                {labelOf(source)} → {labelOf(target)}
+                {labelOf(source, catalogue)} → {labelOf(target, catalogue)}
               </span>
             </span>
             <span className="diag__item">
