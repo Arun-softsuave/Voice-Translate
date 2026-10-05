@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from app.services.captions import CaptionLog
+
 
 class CallStatus(str, Enum):
     CONNECTING = "CONNECTING"
@@ -61,6 +63,8 @@ class TranslationSession:
     status: CallStatus = CallStatus.CONNECTING
     created_at: float = field(default_factory=time.monotonic)
     error: str | None = None
+    # Never part of snapshot(): captions are what people said.
+    captions: CaptionLog = field(default_factory=CaptionLog, repr=False)
 
     def participant(self, pid: ParticipantId) -> Participant:
         return self.a if pid is ParticipantId.A else self.b

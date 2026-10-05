@@ -83,6 +83,7 @@ class SessionRegistry:
     def remove(self, session_id: str) -> None:
         session = self._sessions.pop(session_id, None)
         if session:
+            session.captions.close()
             log.info("session_removed", extra={"session_id": session_id,
                                                 **session.snapshot()["participants"]})
 

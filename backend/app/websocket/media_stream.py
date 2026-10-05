@@ -26,6 +26,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 from app.config import get_settings
 from app.models.session import CallStatus, ParticipantId
 from app.services import session_service
+from app.services.captions import HEARD, SPOKE
 from app.services.gemini_service import GeminiTranslateSession
 from app.services.realtime_service import RealtimeTranslator
 from app.services.session_service import registry
@@ -253,6 +254,10 @@ async def _open_translator(settings, session, pid: ParticipantId):
             session, pid, audio_b64, echo_mode=settings.echo_mode
         )
 
+    async def caption(direction: str, text: str) -> None:
+        # "in" is what this participant said, "out" is the translation.
+        session.captions.add(pid, HEARD if direction == "in" else SPOKE, text)
+
     backend = translator_class(settings)
     translator = backend(
         settings,
@@ -261,6 +266,7 @@ async def _open_translator(settings, session, pid: ParticipantId):
         source_language=speaker.language,
         target_language=counterpart.language,
         on_audio=deliver,
+        on_transcript=caption,
         label=f"{session.session_id[:12]}/{pid.value}",
     )
 

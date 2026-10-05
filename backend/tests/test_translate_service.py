@@ -260,3 +260,25 @@ async def test_usage_is_billed_per_minute_of_audio(patched):
     assert summary["billing"] == "per_minute"
     assert summary["audio_in_min"] == pytest.approx(1 / 60, abs=0.005)
     assert summary["usd"] > 0
+
+
+# --------------------------------------------------------------- captions
+@pytest.mark.asyncio
+async def test_both_transcripts_reach_the_caption_callback(patched):
+    texts = []
+
+    async def on_transcript(direction, text):
+        texts.append((direction, text))
+
+    session = TranslateSession(
+        settings(), source_language="hi", target_language="ta",
+        on_audio=lambda b: asyncio.sleep(0), on_transcript=on_transcript, label="t")
+    await session.connect()
+    patched.push({"type": "session.created"})
+    patched.push({"type": "session.input_transcript.delta", "delta": "नमस्ते"})
+    patched.push({"type": "session.output_transcript.delta", "delta": "வணக்கம்"})
+    patched.push({"type": "session.output_transcript.delta", "delta": ""})
+    await asyncio.sleep(0.05)
+
+    assert texts == [("in", "नमस्ते"), ("out", "வணக்கம்")]
+    await session.close()

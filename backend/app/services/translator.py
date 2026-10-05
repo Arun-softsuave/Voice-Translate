@@ -20,6 +20,11 @@ Letting any other format reach it would inflate `queued_ms` and break barge-in
 accounting. Keeping the boundary at µ-law means nothing downstream has to know
 which backend is running.
 
+Every backend also accepts `on_transcript(direction, text)`: "in" fragments are
+what the speaker said, "out" fragments are the translation. They feed the live
+captions. `RealtimeTranslator` reports only "out"; hearing the input there would
+need a separate, separately billed transcription model.
+
 Languages are passed as ISO codes ("ta"), not display names. The translate
 endpoint wants codes; the realtime prompt wants names and resolves them itself.
 """

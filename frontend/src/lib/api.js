@@ -67,4 +67,8 @@ export const api = {
   session: (sessionId) => request(`/api/call/${sessionId}`),
 
   end: (sessionId) => request(`/api/call/end/${sessionId}`, { method: 'POST' }),
+
+  /** Server-Sent Events stream of live captions for one side of the call. */
+  captionsUrl: (sessionId, viewer = 'A') =>
+    `${BASE}/api/call/${encodeURIComponent(sessionId)}/captions?viewer=${viewer}`,
 }

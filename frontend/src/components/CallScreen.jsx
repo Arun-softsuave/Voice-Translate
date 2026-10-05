@@ -1,6 +1,7 @@
 import { State, label, tone } from '../lib/callState'
 import { labelOf } from '../lib/languages'
 import { format } from '../lib/phone'
+import { Captions } from './Captions'
 import { Button, Meter, Status } from './ui'
 
 const clock = (total) => {
@@ -20,6 +21,8 @@ export function CallScreen({
   phoneNumber,
   demoMode,
   catalogue = [],
+  captions = [],
+  now = 0,
   onHangUp,
   onToggleMute,
   onReset,
@@ -29,11 +32,15 @@ export function CallScreen({
   const speaking = levels.input > 0.06
   const listening = levels.output > 0.06
 
+  // Once there is anything to read, the party panes fold into a strip and
+  // the captions take the stage.
+  const captioned = translating || captions.length > 0
+
   const a = session?.participants?.A
   const b = session?.participants?.B
 
   return (
-    <section className="call">
+    <section className={`call${captioned ? ' call--captions' : ''}`}>
       <header className="call__bar">
         <Status tone={tone(state)}>{label(state)}</Status>
         <span className="call__timer">{clock(seconds)}</span>
@@ -83,6 +90,10 @@ export function CallScreen({
             </span>
           </div>
         </div>
+
+        {captioned && (
+          <Captions lines={captions} now={now} language={source} catalogue={catalogue} />
+        )}
       </div>
 
       <footer className="call__foot">

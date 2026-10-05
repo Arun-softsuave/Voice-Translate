@@ -55,6 +55,7 @@ class RealtimeTranslator:
         target_language: str,          # ISO code, e.g. "hi"
         on_audio: Callable[[str], Awaitable[None]],
         on_speech_started: Callable[[], Awaitable[None]] | None = None,
+        on_transcript: Callable[[str, str], Awaitable[None]] | None = None,
         label: str = "",
     ) -> None:
         self._settings = settings
@@ -66,6 +67,8 @@ class RealtimeTranslator:
         self.target_name = language_name(target_language)
         self._on_audio = on_audio
         self._on_speech_started = on_speech_started
+        # "out" only: input transcription would need a separate paid model.
+        self._on_transcript = on_transcript
         self.label = label
 
         self._ws = None
@@ -235,6 +238,12 @@ class RealtimeTranslator:
                     extra={"label": self.label, **one,
                            "session_usd": self.usage.usd},
                 )
+            return
+
+        if etype == "response.output_audio_transcript.delta":
+            delta = event.get("delta")
+            if delta and self._on_transcript is not None:
+                await self._on_transcript("out", delta)
             return
 
         # Transcripts are logged only to verify the model is interpreting and

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi.responses import StreamingResponse
 
 from app.config import Settings, get_settings
 from app.logging_config import mask_phone
@@ -17,12 +20,16 @@ from app.schemas.call import (
     TokenResponse,
 )
 from app.services import twilio_service
+from app.services.captions import view
 from app.services.session_service import registry
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/call", tags=["call"])
 
 TOKEN_TTL = 3600
+# A comment line this often keeps ngrok and other proxies from closing an
+# idle caption stream during a long pause in the conversation.
+CAPTION_PING_S = 15.0
 
 
 def _settings() -> Settings:
@@ -166,6 +173,54 @@ def end_call(session_id: str, settings: Settings = Depends(_settings)):
         raise HTTPException(404, {"code": "UNKNOWN_SESSION", "message": "No such call."})
     _teardown(session, settings, reason="user_ended")
     return {"session_id": session_id, "status": session.status.value}
+
+
+@router.get("/{session_id}/captions")
+async def captions(session_id: str, viewer: str = "A",
+                   settings: Settings = Depends(_settings)):
+    """Live captions for one participant, as Server-Sent Events.
+
+    Sends a `snapshot` of every line so far, then one `caption` event per
+    update. Each event carries the line's full text, so the client replaces
+    by id. Ends with an `end` event when the call does.
+    """
+    session = registry.get(session_id)
+    if session is None:
+        raise HTTPException(404, {"code": "UNKNOWN_SESSION", "message": "No such call."})
+    if viewer not in ("A", "B"):
+        raise HTTPException(422, {"code": "UNKNOWN_PARTICIPANT", "message": "Unknown leg."})
+
+    pid = ParticipantId(viewer)
+    echo = settings.echo_mode
+    lines, queue = session.captions.subscribe()
+
+    def event(name: str, data) -> str:
+        return f"event: {name}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+    async def stream():
+        try:
+            shown = [v for v in (view(l, pid, session, echo_mode=echo) for l in lines) if v]
+            yield event("snapshot", shown)
+            while True:
+                try:
+                    line = await asyncio.wait_for(queue.get(), CAPTION_PING_S)
+                except asyncio.TimeoutError:
+                    yield ": ping\n\n"
+                    continue
+                if line is None:
+                    yield event("end", {})
+                    return
+                shown = view(line, pid, session, echo_mode=echo)
+                if shown:
+                    yield event("caption", shown)
+        finally:
+            session.captions.unsubscribe(queue)
+
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.get("/{session_id}", response_model=SessionResponse)

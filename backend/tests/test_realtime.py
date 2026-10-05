@@ -225,3 +225,24 @@ async def test_cancel_sends_response_cancel(patched):
     assert patched.of_type("response.cancel")
 
     await translator.close()
+
+
+@pytest.mark.asyncio
+async def test_translation_text_reaches_the_caption_callback(patched):
+    """Only "out": hearing the input here would need a separate paid model."""
+    texts = []
+
+    async def on_transcript(direction, text):
+        texts.append((direction, text))
+
+    translator = RealtimeTranslator(
+        get_settings(), source_language="ta", target_language="hi",
+        on_audio=lambda b: asyncio.sleep(0), on_transcript=on_transcript, label="t")
+    await translator.connect()
+    patched.push({"type": "session.updated"})
+    patched.push({"type": "response.output_audio_transcript.delta", "delta": "नमस्ते"})
+    patched.push({"type": "response.output_audio_transcript.delta", "delta": ""})
+    await asyncio.sleep(0.05)
+
+    assert texts == [("out", "नमस्ते")]
+    await translator.close()

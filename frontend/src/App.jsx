@@ -4,11 +4,13 @@ import { CallScreen } from './components/CallScreen'
 import { SetupScreen } from './components/SetupScreen'
 import { Toast } from './components/ui'
 import { useCall } from './hooks/useCall'
+import { useCaptions } from './hooks/useCaptions'
 import { api } from './lib/api'
-import { State } from './lib/callState'
+import { State, isLive } from './lib/callState'
 
 export default function App() {
   const call = useCall()
+  const captions = useCaptions(call.sessionId, isLive(call.state))
   const [demoMode, setDemoMode] = useState(null)
   // The backend decides which languages are offered, and the two directions
   // differ on the translate model. null = not known yet.
@@ -78,6 +80,8 @@ export default function App() {
           catalogue={languages.source}
           phoneNumber={request.current.phone}
           demoMode={demoMode}
+          captions={captions.lines}
+          now={captions.now}
           onHangUp={call.hangUp}
           onToggleMute={call.toggleMute}
           onReset={call.reset}

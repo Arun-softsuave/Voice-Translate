@@ -693,3 +693,254 @@ body:has(.call) { --foot-h: 128px; }
   .call__stage { padding-block: var(--s4); }
   .party { padding-block: var(--s3); }
 }
+
+
+/* ---------------------------------------------------------------------------
+   Live captions
+
+   Once there is anything to read, the two big party panes fold into a strip
+   and the caption log takes the stage. The strip keeps the mirrored axis of
+   the call screen: you on the left, them on the right, and the captions
+   below follow the same sides.
+
+   Gold stays on one thing: the line still being spoken.
+--------------------------------------------------------------------------- */
+.call--captions {
+  /* A fixed height so the log scrolls inside the stage instead of pushing
+     the controls off the bottom. */
+  block-size: 100svh;
+}
+
+.call--captions .call__stage {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  place-items: stretch;
+  gap: var(--s4);
+  padding-block: var(--s4);
+}
+
+/* --- the folded strip ---------------------------------------------------- */
+.call--captions .parties {
+  height: auto;
+  margin-inline: auto;
+  grid-template-rows: none;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: stretch;
+}
+
+.call--captions .party {
+  flex-direction: row;
+  justify-content: flex-start;
+  text-align: left;
+  gap: var(--s3);
+  padding: var(--s3) var(--s4);
+  border-radius: var(--r-md);
+}
+
+.call--captions .party:last-child {
+  flex-direction: row-reverse;
+  text-align: right;
+}
+
+.call--captions .party > span:nth-child(2) { min-width: 0; }
+
+.call--captions .party__badge {
+  width: 36px;
+  height: 36px;
+  font-size: 1.2rem;
+}
+
+.call--captions .party__lang {
+  font-size: clamp(1.15rem, 0.9rem + 0.9vw, 1.6rem);
+}
+
+.call--captions .party__meta {
+  min-height: 0;
+  margin-inline-start: auto;
+}
+
+.call--captions .party:last-child .party__meta {
+  margin-inline-start: 0;
+  margin-inline-end: auto;
+}
+
+.call--captions .meter { --meter-scale: 1; }
+
+.call--captions .bridge {
+  flex-direction: row;
+  width: auto;
+  padding: 0 var(--s3);
+  gap: var(--s2);
+}
+
+.call--captions .bridge__line {
+  flex: none;
+  width: clamp(12px, 2.5vw, 36px);
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--line-strong), transparent);
+}
+
+.call--captions .bridge--active .bridge__line {
+  background: linear-gradient(90deg, transparent, var(--gold), transparent);
+  background-size: 200% 100%;
+  animation: flow-x 2.4s linear infinite;
+}
+
+/* --- the log ------------------------------------------------------------- */
+.captions {
+  width: 100%;
+  max-width: var(--measure-stage);
+  margin-inline: auto;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: linear-gradient(180deg, var(--surface), rgba(12, 38, 32, 0.4));
+  overflow: hidden;
+}
+
+.captions__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s3);
+  padding: var(--s3) var(--s5);
+  border-bottom: 1px solid var(--line);
+}
+
+.captions__title {
+  font-size: var(--t-xs);
+  letter-spacing: var(--track-wide);
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.captions__lang {
+  font-family: var(--font-mono);
+  font-size: var(--t-xs);
+  color: var(--muted);
+}
+
+.captions__list {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+  padding: var(--s5);
+  scrollbar-color: var(--raised-hi) transparent;
+}
+
+.captions__empty {
+  margin: auto;
+  max-width: 34ch;
+  text-align: center;
+  color: var(--muted);
+  font-size: var(--t-sm);
+}
+
+.cap {
+  display: grid;
+  gap: var(--s1);
+  max-width: min(78%, 34rem);
+}
+
+.cap--you { align-self: flex-start; }
+.cap--them { align-self: flex-end; text-align: right; }
+
+.cap__meta {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+  font-size: var(--t-xs);
+  letter-spacing: var(--track-mid);
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.cap--them .cap__meta { justify-content: flex-end; }
+
+.cap__meta time {
+  font-family: var(--font-mono);
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.cap__text {
+  margin: 0;
+  padding: var(--s3) var(--s4);
+  border-radius: var(--r-md);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+/* Yours: a quiet check of what the model heard. */
+.cap--you .cap__text {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-start-start-radius: 4px;
+  color: var(--text-soft);
+  font-size: var(--t-md);
+}
+
+/* Theirs: the reason the panel exists, so larger and brighter. */
+.cap--them .cap__text {
+  background: var(--raised);
+  border: 1px solid var(--line-strong);
+  border-start-end-radius: 4px;
+  color: var(--text);
+  font-size: 1.0625rem;
+  line-height: 1.5;
+}
+
+.cap--live .cap__text {
+  border-color: var(--gold-line);
+  background:
+    radial-gradient(80% 120% at 100% 0%, var(--gold-wash), transparent 70%),
+    var(--raised);
+}
+
+.cap__live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--gold-bright);
+}
+
+.cap__live::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: var(--r-full);
+  background: var(--gold);
+}
+
+.cap__caret {
+  display: inline-block;
+  width: 2px;
+  height: 1.05em;
+  margin-inline-start: 3px;
+  vertical-align: -0.15em;
+  background: var(--gold-bright);
+  animation: caret-blink 1s steps(2, start) infinite;
+}
+
+@keyframes caret-blink { to { visibility: hidden; } }
+
+/* Phones: stack the strip, keep the captions full width. */
+@media (max-width: 640px) {
+  .call--captions .parties { grid-template-columns: minmax(0, 1fr); gap: var(--s2); }
+  .call--captions .party:last-child { flex-direction: row; text-align: left; }
+  .call--captions .party:last-child .party__meta { margin-inline-start: auto; margin-inline-end: 0; }
+  .call--captions .bridge { justify-content: center; padding: 0; }
+  .captions__list { padding: var(--s4); }
+  .cap { max-width: 92%; }
+}
+
+/* Very short screens: let the page scroll rather than squeeze the log. */
+@media (max-height: 640px) {
+  .call--captions { block-size: auto; }
+  .captions__list { max-block-size: 60svh; }
+}

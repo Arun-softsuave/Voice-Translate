@@ -163,3 +163,19 @@ async def test_gemini_gets_the_same_speaker_to_counterpart_pair(session, recorde
 
     assert recorder.kwargs["source_language"] == "hi"
     assert recorder.kwargs["target_language"] == "ta"
+
+
+@pytest.mark.asyncio
+async def test_translator_text_lands_in_the_session_captions(session, recorder):
+    """"in" is the speaker's own words, "out" the translation."""
+    await media_stream._open_translator(enabled(), session, ParticipantId.A)
+
+    on_transcript = recorder.kwargs["on_transcript"]
+    await on_transcript("in", "வணக்கம்")
+    await on_transcript("out", "नमस्ते")
+
+    lines = session.captions.lines()
+    assert [(l.owner, l.kind, l.text) for l in lines] == [
+        (ParticipantId.A, "heard", "வணக்கம்"),
+        (ParticipantId.A, "spoke", "नमस्ते"),
+    ]

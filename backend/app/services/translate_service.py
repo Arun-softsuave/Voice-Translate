@@ -61,6 +61,7 @@ class TranslateSession:
         target_language: str,          # ISO code, e.g. "ta"
         on_audio: Callable[[str], Awaitable[None]],
         on_speech_started: Callable[[], Awaitable[None]] | None = None,
+        on_transcript: Callable[[str, str], Awaitable[None]] | None = None,
         label: str = "",
     ) -> None:
         self._settings = settings
@@ -68,6 +69,7 @@ class TranslateSession:
         self.target_language = target_language
         self._on_audio = on_audio
         self._on_speech_started = on_speech_started   # unused; kept for parity
+        self._on_transcript = on_transcript           # ("in" | "out", text)
         self.label = label
 
         self._ws = None
@@ -258,12 +260,14 @@ class TranslateSession:
 
         if etype == "session.output_transcript.delta":
             self.responses += 1
+            await self._transcript("out", event.get("delta"))
             return
 
         if etype == "session.input_transcript.delta":
             # First sign the model has heard speech; used only for latency.
             if self._speech_stopped_at is None:
                 self._speech_stopped_at = time.monotonic()
+            await self._transcript("in", event.get("delta"))
             return
 
         if etype == "session.closed":
@@ -276,3 +280,7 @@ class TranslateSession:
             log.error("translate_error",
                       extra={"label": self.label, "code": err.get("code"),
                              "detail": err.get("message")})
+
+    async def _transcript(self, direction: str, text: str | None) -> None:
+        if text and self._on_transcript is not None:
+            await self._on_transcript(direction, text)
