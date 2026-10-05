@@ -37,6 +37,25 @@ def _opt(name: str, default: str = "") -> str:
     return os.getenv(name, default).strip()
 
 
+BACKENDS = ("translate", "realtime", "gemini")
+
+
+def _backend() -> str:
+    """Which translation backend to run.
+
+    OPENAI_TRANSLATE_MODE is the old name, from before a non-OpenAI backend
+    existed. It is still honoured so existing .env files keep working.
+    """
+    value = (_opt("TRANSLATION_BACKEND") or _opt("OPENAI_TRANSLATE_MODE", "translate")).lower()
+    # An unknown value used to fall through to the realtime backend silently.
+    # Running a model nobody chose is worse than refusing to start.
+    if value not in BACKENDS:
+        raise RuntimeError(
+            f"TRANSLATION_BACKEND must be one of {', '.join(BACKENDS)}; got {value!r}."
+        )
+    return value
+
+
 def _bool(name: str, default: bool = False) -> bool:
     return _opt(name, str(default)).lower() in ("1", "true", "yes", "on")
 
@@ -51,13 +70,21 @@ class Settings:
     twilio_twiml_app_sid: str
     twilio_phone_number: str        # non-Indian caller ID for the PSTN leg
 
+    # --- Translation ------------------------------------------------------
+    # "translate" = OpenAI gpt-realtime-translate (starts mid-sentence)
+    # "realtime"  = OpenAI gpt-realtime-2.1 (conversational, prompt-constrained)
+    # "gemini"    = Google gemini-3.5-live-translate (starts mid-sentence,
+    #               70+ target languages including every Indian one we list)
+    translation_backend: str
+
     # --- OpenAI -----------------------------------------------------------
     openai_api_key: str
     openai_realtime_model: str
-    # "translate" = gpt-realtime-translate (starts translating mid-sentence);
-    # "realtime"  = gpt-realtime-2.1 (conversational model, prompt-constrained)
-    openai_translate_mode: str
     openai_translate_model: str
+
+    # --- Google Gemini ----------------------------------------------------
+    gemini_api_key: str
+    gemini_translate_model: str
 
     # --- URLs -------------------------------------------------------------
     backend_public_url: str         # https://<tunnel>  (no trailing slash)
@@ -73,20 +100,30 @@ class Settings:
 
     @property
     def use_translate_backend(self) -> bool:
-        return self.openai_translate_mode == "translate"
+        """True only for OpenAI's gpt-realtime-translate."""
+        return self.translation_backend == "translate"
+
+    @property
+    def use_gemini_backend(self) -> bool:
+        return self.translation_backend == "gemini"
 
     @property
     def translation_model(self) -> str:
         """The model actually in use, whichever backend is selected."""
-        return (self.openai_translate_model if self.use_translate_backend
-                else self.openai_realtime_model)
+        return {
+            "translate": self.openai_translate_model,
+            "realtime": self.openai_realtime_model,
+            "gemini": self.gemini_translate_model,
+        }[self.translation_backend]
 
     @property
     def translation_enabled(self) -> bool:
-        """No OpenAI key means pass-through audio, not a crash.
+        """No key for the selected backend means pass-through audio, not a crash.
 
         This keeps the echo test usable before phase 7 is configured.
         """
+        if self.use_gemini_backend:
+            return bool(self.gemini_api_key)
         return bool(self.openai_api_key)
 
     @property
@@ -108,10 +145,13 @@ def get_settings() -> Settings:
         twilio_api_secret=_req("TWILIO_API_SECRET"),
         twilio_twiml_app_sid=_req("TWILIO_TWIML_APP_SID"),
         twilio_phone_number=_opt("TWILIO_PHONE_NUMBER"),
+        translation_backend=_backend(),
         openai_api_key=_opt("OPENAI_API_KEY"),          # not needed until phase 7
         openai_realtime_model=_opt("OPENAI_REALTIME_MODEL", "gpt-realtime-2.1"),
-        openai_translate_mode=_opt("OPENAI_TRANSLATE_MODE", "translate").lower(),
         openai_translate_model=_opt("OPENAI_TRANSLATE_MODEL", "gpt-realtime-translate"),
+        gemini_api_key=_opt("GEMINI_API_KEY"),
+        gemini_translate_model=_opt("GEMINI_TRANSLATE_MODEL",
+                                    "gemini-3.5-live-translate-preview"),
         backend_public_url=_req("BACKEND_PUBLIC_URL").rstrip("/"),
         frontend_url=_opt("FRONTEND_URL", "http://localhost:5173").rstrip("/"),
         demo_mode=_bool("DEMO_MODE", True),

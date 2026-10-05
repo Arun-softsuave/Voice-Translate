@@ -23,12 +23,12 @@ def health(settings: Settings = Depends(_settings)):
         "echo_mode": settings.echo_mode,
         "media_stream_url": settings.media_stream_wss_url,
         "active_sessions": len(list(registry.all())),
-        "translate_mode": settings.openai_translate_mode,
+        "translate_mode": settings.translation_backend,
         # The UI renders exactly these. The target list is narrower than the
         # source list on the translate backend, which is the whole point.
         "languages": {
-            "source": languages.sources_for(settings.use_translate_backend),
-            "target": languages.targets_for(settings.use_translate_backend),
+            "source": languages.sources_for(settings.translation_backend),
+            "target": languages.targets_for(settings.translation_backend),
         },
     }
 

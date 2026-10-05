@@ -7,12 +7,12 @@ why no guessing by phone number or arrival order is ever needed.
 Audio path (design doc §7):
 
     Twilio media frame
-      -> OpenAI Realtime session for THIS participant's language
+      -> translation session (OpenAI or Gemini) for THIS participant's language
       -> translated audio
       -> session_service.route_audio -> the OPPOSITE leg
 
-With no OpenAI key configured the translator is skipped and the original audio
-is forwarded, which is what makes the echo test work before phase 7 is set up.
+With no API key for the chosen backend the translator is skipped and the original
+audio is forwarded, which is what makes the echo test work before phase 7 is set up.
 """
 
 from __future__ import annotations
@@ -26,6 +26,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 from app.config import get_settings
 from app.models.session import CallStatus, ParticipantId
 from app.services import session_service
+from app.services.gemini_service import GeminiTranslateSession
 from app.services.realtime_service import RealtimeTranslator
 from app.services.session_service import registry
 from app.services.translate_service import TranslateSession
@@ -218,11 +219,15 @@ def translator_class(settings):
     Kept as a function so tests can patch the choice rather than a class name,
     and so switching backends is one env var rather than a code change.
     """
-    return TranslateSession if settings.use_translate_backend else RealtimeTranslator
+    return {
+        "translate": TranslateSession,
+        "realtime": RealtimeTranslator,
+        "gemini": GeminiTranslateSession,
+    }[settings.translation_backend]
 
 
 async def _open_translator(settings, session, pid: ParticipantId):
-    """Start the OpenAI session that translates THIS participant's speech.
+    """Start the session that translates THIS participant's speech.
 
     Its output is routed to the opposite participant — or back to the sender in
     echo mode, which is how one browser can test the whole pipeline alone.
@@ -231,7 +236,8 @@ async def _open_translator(settings, session, pid: ParticipantId):
         log.info(
             "translation_disabled",
             extra={"session_id": session.session_id, "participant": pid.value,
-                   "reason": "no OPENAI_API_KEY"},
+                   "reason": "no API key for backend "
+                             f"{settings.translation_backend!r}"},
         )
         return None
 

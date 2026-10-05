@@ -2,8 +2,8 @@
 
 Two things are covered here:
 
-1. **Backend selection.** `OPENAI_TRANSLATE_MODE` chooses between
-   `gpt-realtime-translate` and `gpt-realtime-2.1`. Getting this wrong means
+1. **Backend selection.** `TRANSLATION_BACKEND` chooses between
+   `gpt-realtime-translate`, `gpt-realtime-2.1` and Gemini. Getting this wrong means
    silently running the model you did not intend.
 
 2. **The language pair**, which is regression cover for a real bug: in echo
@@ -21,6 +21,7 @@ import pytest
 
 from app.config import get_settings
 from app.models.session import ParticipantId
+from app.services.gemini_service import GeminiTranslateSession
 from app.services.realtime_service import RealtimeTranslator
 from app.services.session_service import SessionRegistry
 from app.services.translate_service import TranslateSession
@@ -60,8 +61,8 @@ def recorder(monkeypatch):
 
 
 def enabled(echo: bool = False, mode: str = "translate"):
-    return replace(get_settings(), openai_api_key="sk-test",
-                   echo_mode=echo, openai_translate_mode=mode)
+    return replace(get_settings(), openai_api_key="sk-test", gemini_api_key="g-test",
+                   echo_mode=echo, translation_backend=mode)
 
 
 # ------------------------------------------------------------ selection
@@ -74,13 +75,29 @@ def test_realtime_mode_selects_the_conversational_backend():
 
 
 def test_translate_is_the_default_mode():
-    assert get_settings().openai_translate_mode == "translate"
+    assert get_settings().translation_backend == "translate"
     assert get_settings().use_translate_backend is True
 
 
 def test_translation_model_reports_the_one_actually_in_use():
     assert enabled(mode="translate").translation_model == "gpt-realtime-translate"
     assert enabled(mode="realtime").translation_model == "gpt-realtime-2.1"
+    assert enabled(mode="gemini").translation_model == "gemini-3.5-live-translate-preview"
+
+
+def test_gemini_mode_selects_the_gemini_backend():
+    assert media_stream.translator_class(enabled(mode="gemini")) is GeminiTranslateSession
+
+
+def test_gemini_needs_its_own_key_not_openai_s():
+    """An OpenAI key must not make the Gemini backend look configured."""
+    only_openai = replace(get_settings(), translation_backend="gemini",
+                          openai_api_key="sk-test", gemini_api_key="")
+    assert only_openai.translation_enabled is False
+
+    only_gemini = replace(get_settings(), translation_backend="gemini",
+                          openai_api_key="", gemini_api_key="g-test")
+    assert only_gemini.translation_enabled is True
 
 
 # -------------------------------------------------------- language pair
@@ -138,3 +155,11 @@ async def test_no_translator_without_an_api_key(session, recorder):
 
     assert result is None, "audio must pass through when translation is unconfigured"
     assert recorder.kwargs is None
+
+
+@pytest.mark.asyncio
+async def test_gemini_gets_the_same_speaker_to_counterpart_pair(session, recorder):
+    await media_stream._open_translator(enabled(mode="gemini"), session, ParticipantId.B)
+
+    assert recorder.kwargs["source_language"] == "hi"
+    assert recorder.kwargs["target_language"] == "ta"

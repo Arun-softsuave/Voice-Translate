@@ -11,3 +11,6 @@ dist/
 build/
 .DS_Store
 *.log
+
+# Probe outputs, regenerated on every run
+backend/gemini_probe_*.wav

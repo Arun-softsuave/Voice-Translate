@@ -123,9 +123,10 @@ Media Stream WebSocket and bidirectional audio injection all at once.
 | `TWILIO_API_KEY` / `TWILIO_API_SECRET` | Signing browser Access Tokens |
 | `TWILIO_TWIML_APP_SID` | TwiML App backing the browser leg |
 | `TWILIO_PHONE_NUMBER` | Caller ID for the PSTN leg — must be non-Indian |
-| `OPENAI_API_KEY` | Translation |
-| `OPENAI_TRANSLATE_MODE` | `translate` (default) or `realtime` — which backend to use |
-| `OPENAI_TRANSLATE_MODEL` / `OPENAI_REALTIME_MODEL` | Model id for each backend |
+| `TRANSLATION_BACKEND` | `translate` (default), `realtime` or `gemini` — which backend to use. `OPENAI_TRANSLATE_MODE` is the old name and still works |
+| `OPENAI_API_KEY` | Translation on the two OpenAI backends |
+| `OPENAI_TRANSLATE_MODEL` / `OPENAI_REALTIME_MODEL` | Model id for each OpenAI backend |
+| `GEMINI_API_KEY` / `GEMINI_TRANSLATE_MODEL` | Translation on the `gemini` backend |
 | `BACKEND_PUBLIC_URL` | Public HTTPS tunnel; `wss://` stream URL is derived from it |
 | `FRONTEND_URL` | CORS origin |
 | `DEMO_MODE` | `true` = browser↔browser, no PSTN call, no telephony spend |
@@ -137,16 +138,22 @@ short-lived Access Token.
 
 ## Translation backends
 
-Two are supported; switch with one env var and a restart.
+Three are supported; switch with `TRANSLATION_BACKEND` and a restart.
 
-| | `translate` (default) | `realtime` |
-|---|---|---|
-| Model | `gpt-realtime-translate` | `gpt-realtime-2.1` |
-| Endpoint | `/v1/realtime/translations` | `/v1/realtime` |
-| Latency | starts translating **mid-sentence** | waits for end of speech + VAD window |
-| Audio | 24 kHz PCM16 (we resample) | µ-law 8 kHz, no conversion |
-| Billing | $0.034 per audio-minute | per token |
-| Tamil output | works, but **not documented** by OpenAI | officially supported |
+| | `translate` (default) | `realtime` | `gemini` |
+|---|---|---|---|
+| Model | `gpt-realtime-translate` | `gpt-realtime-2.1` | `gemini-3.5-live-translate-preview` |
+| Endpoint | `/v1/realtime/translations` | `/v1/realtime` | Gemini Live API |
+| Latency | starts translating **mid-sentence** | waits for end of speech + VAD window | starts translating **mid-sentence** |
+| Audio | 24 kHz PCM16 (we resample) | µ-law 8 kHz, no conversion | 16 kHz in / 24 kHz out (we resample) |
+| Billing | $0.034 per audio-minute | per token | $0.0053/min in + $0.0315/min out; free tier available |
+| Languages | 20; 14 as targets | 20, both ways | **76, both ways** |
+| Tamil output | works, but **not documented** by OpenAI | officially supported | documented |
+
+Gemini's free tier lets Google use call content to improve its products —
+including the audio of the person being called. Use a paid-tier key for real
+calls. `python scripts/probe_gemini_translate.py` checks a key and a language
+pair end to end before you place a call.
 
 `translate` is the default because latency is the question this POC exists to
 answer. If its undocumented Tamil support ever regresses, set

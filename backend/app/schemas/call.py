@@ -46,14 +46,14 @@ class StartCallRequest(BaseModel):
 
     @model_validator(mode="after")
     def _check_language_pair(self):
-        translate = get_settings().use_translate_backend
+        backend = get_settings().translation_backend
 
-        if self.source_language not in source_codes(translate):
+        if self.source_language not in source_codes(backend):
             raise ValueError(
                 f"{self.source_language!r} is not available as a source language."
             )
 
-        if self.target_language not in target_codes(translate):
+        if self.target_language not in target_codes(backend):
             name = name_of(self.target_language)
             raise ValueError(
                 f"{name} is not available as a target language on the current "

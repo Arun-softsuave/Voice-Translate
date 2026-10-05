@@ -2,12 +2,15 @@ fastapi==0.115.6
 uvicorn[standard]==0.34.0
 websockets==14.1
 python-dotenv==1.0.1
-pydantic==2.10.4
+# google-genai needs >= 2.12.5
+pydantic==2.13.5
 twilio==9.4.1
 httpx==0.28.1
 python-multipart==0.0.20
 # resampling between Twilio's 8 kHz ulaw and the translate endpoint's 24 kHz PCM16
 numpy==2.4.6
+# Gemini Live API (TRANSLATION_BACKEND=gemini)
+google-genai==2.25.0
 
 # dev / test
 pytest==8.3.4

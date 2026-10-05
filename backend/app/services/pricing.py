@@ -32,8 +32,14 @@ PRICES["gpt-realtime-mini"] = PRICES["gpt-realtime-2.1-mini"]
 # gpt-realtime-translate bills by audio DURATION, not tokens. Without an entry
 # here, prices_for() would silently fall back to the full token rates and
 # report a cost that is both wrong and plausible-looking.
-PER_MINUTE: dict[str, float] = {
-    "gpt-realtime-translate": 0.034,
+#
+# (input $/min, output $/min). OpenAI charges one rate for audio in either
+# direction; Gemini prices the two separately, from ai.google.dev/pricing,
+# checked 30 Sep 2026. These are PAID-tier rates: on Gemini's free tier the
+# real bill is zero, but the figure still shows what the call would cost.
+PER_MINUTE: dict[str, tuple[float, float]] = {
+    "gpt-realtime-translate": (0.034, 0.034),
+    "gemini-3.5-live-translate-preview": (0.0053, 0.0315),
 }
 
 
@@ -118,8 +124,9 @@ class Usage:
     def usd(self) -> float:
         if is_per_minute(self.model):
             # Billed on audio handled, in whichever direction.
-            return round((self.audio_in_minutes + self.audio_out_minutes)
-                         * PER_MINUTE[self.model], 6)
+            rate_in, rate_out = PER_MINUTE[self.model]
+            return round(self.audio_in_minutes * rate_in
+                         + self.audio_out_minutes * rate_out, 6)
         return self.cost_of(self.as_counts())
 
     @property

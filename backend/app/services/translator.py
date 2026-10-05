@@ -1,15 +1,18 @@
 """The interface both translation backends satisfy.
 
-Two implementations exist:
+Three implementations exist:
 
 * `realtime_service.RealtimeTranslator` — gpt-realtime-2.1 on /v1/realtime.
   A conversational model held to interpreting by its prompt.
 * `translate_service.TranslateSession` — gpt-realtime-translate on
   /v1/realtime/translations. Purpose-built, starts translating mid-sentence.
+* `gemini_service.GeminiTranslateSession` — Google gemini-3.5-live-translate
+  on the Gemini Live API. Purpose-built too, and speaks 70+ target languages.
 
 The important contract: **both speak Twilio's format on both sides** — base64
 G.711 µ-law 8 kHz in, the same out. The translate endpoint only accepts 24 kHz
-PCM16, but that conversion is its own private business.
+PCM16 and Gemini 16 kHz in / 24 kHz out, but those conversions are each
+backend's own private business.
 
 That is not an arbitrary choice. `session_service.route_audio` measures
 playback duration as `len(bytes) / 8`, which is true only for 8 kHz µ-law.

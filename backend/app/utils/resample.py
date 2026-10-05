@@ -23,6 +23,9 @@ Three things here are easy to get wrong and miserable to debug later:
 
 8000 and 24000 divide exactly, so this is integer 3x conversion with no
 fractional interpolation anywhere.
+
+Gemini Live takes 16 kHz input and returns 24 kHz output. The output side is
+the same 24k -> 8k path as OpenAI; the input side is the same upsampler at 2x.
 """
 
 from __future__ import annotations
@@ -34,6 +37,8 @@ from app.utils import audio
 TWILIO_RATE = 8000
 OPENAI_RATE = 24000
 RATIO = OPENAI_RATE // TWILIO_RATE          # exactly 3
+GEMINI_IN_RATE = 16000
+GEMINI_RATIO = GEMINI_IN_RATE // TWILIO_RATE   # exactly 2
 
 # Below the 4 kHz Nyquist of the 8 kHz side, and near the top of the telephone
 # band, so nothing worth keeping is lost.
@@ -49,6 +54,7 @@ def _design_lowpass(cutoff_hz: int, rate: int, taps: int) -> np.ndarray:
 
 
 _LOWPASS = _design_lowpass(CUTOFF_HZ, OPENAI_RATE, NUM_TAPS)
+_LOWPASS_16K = _design_lowpass(CUTOFF_HZ, GEMINI_IN_RATE, NUM_TAPS)
 GROUP_DELAY = (NUM_TAPS - 1) // 2           # samples, at 24 kHz
 
 
@@ -76,26 +82,42 @@ def _to_pcm16(samples: np.ndarray) -> bytes:
     return np.clip(np.rint(samples), -32768, 32767).astype("<i2").tobytes()
 
 
-class TwilioToOpenAI:
-    """µ-law 8 kHz -> PCM16 24 kHz. One instance per inbound stream."""
+class _Upsampler:
+    """µ-law 8 kHz -> PCM16 at an integer multiple. One instance per stream."""
 
-    def __init__(self) -> None:
-        self._filter = _Filter(_LOWPASS)
+    def __init__(self, ratio: int, kernel: np.ndarray) -> None:
+        self._ratio = ratio
+        self._filter = _Filter(kernel)
 
     def __call__(self, ulaw: bytes) -> bytes:
         if not ulaw:
             return b""
         pcm8k = _to_float(audio.ulaw_to_pcm16(ulaw))
 
-        # Zero-stuff to 24 kHz, then low-pass away the spectral images the
-        # stuffing creates. The RATIO gain restores the level the filter loses.
-        stuffed = np.zeros(len(pcm8k) * RATIO, dtype=np.float32)
-        stuffed[::RATIO] = pcm8k * RATIO
+        # Zero-stuff to the target rate, then low-pass away the spectral images
+        # the stuffing creates. The ratio gain restores the level the filter
+        # loses.
+        stuffed = np.zeros(len(pcm8k) * self._ratio, dtype=np.float32)
+        stuffed[::self._ratio] = pcm8k * self._ratio
 
         return _to_pcm16(self._filter(stuffed))
 
     def reset(self) -> None:
         self._filter.reset()
+
+
+class TwilioToOpenAI(_Upsampler):
+    """µ-law 8 kHz -> PCM16 24 kHz. One instance per inbound stream."""
+
+    def __init__(self) -> None:
+        super().__init__(RATIO, _LOWPASS)
+
+
+class TwilioToGemini(_Upsampler):
+    """µ-law 8 kHz -> PCM16 16 kHz. One instance per inbound stream."""
+
+    def __init__(self) -> None:
+        super().__init__(GEMINI_RATIO, _LOWPASS_16K)
 
 
 class OpenAIToTwilio:
@@ -142,3 +164,8 @@ def ulaw_ms(ulaw: bytes) -> float:
 def pcm24k_ms(pcm: bytes) -> float:
     """Duration of a 24 kHz PCM16 payload, in milliseconds."""
     return len(pcm) / 2 / (OPENAI_RATE / 1000)
+
+
+def pcm16k_ms(pcm: bytes) -> float:
+    """Duration of a 16 kHz PCM16 payload, in milliseconds."""
+    return len(pcm) / 2 / (GEMINI_IN_RATE / 1000)

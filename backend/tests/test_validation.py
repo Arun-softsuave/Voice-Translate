@@ -109,3 +109,42 @@ def test_hindi_to_tamil_still_works():
 def test_a_newly_offered_international_target_works():
     req = StartCallRequest(source_language="ta", target_language="fr")
     assert req.target_language == "fr"
+
+
+# --- gemini backend ---------------------------------------------------------
+@pytest.fixture
+def gemini_mode(monkeypatch):
+    from dataclasses import replace
+
+    from app.config import get_settings
+    from app.schemas import call as call_schema
+
+    settings = replace(get_settings(), translation_backend="gemini")
+    monkeypatch.setattr(call_schema, "get_settings", lambda: settings)
+
+
+@pytest.mark.parametrize("target", ["kn", "te", "ml", "mr", "bn", "gu", "pa", "ur"])
+def test_gemini_accepts_indian_targets_openai_rejects(gemini_mode, target):
+    req = StartCallRequest(source_language="hi", target_language=target)
+    assert req.target_language == target
+
+
+def test_gemini_accepts_a_pair_outside_the_core_list(gemini_mode):
+    req = StartCallRequest(source_language="sw", target_language="ar")
+    assert (req.source_language, req.target_language) == ("sw", "ar")
+
+
+def test_gemini_still_rejects_unknown_codes(gemini_mode):
+    with pytest.raises(ValidationError):
+        StartCallRequest(source_language="hi", target_language="xx")
+
+
+def test_gemini_still_rejects_same_language(gemini_mode):
+    with pytest.raises(ValidationError):
+        StartCallRequest(source_language="ta", target_language="ta")
+
+
+def test_gemini_only_languages_are_rejected_on_openai():
+    """Default backend is OpenAI translate: Swahili is not offered there."""
+    with pytest.raises(ValidationError):
+        StartCallRequest(source_language="sw", target_language="hi")

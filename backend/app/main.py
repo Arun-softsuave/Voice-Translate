@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from fastapi import FastAPI, WebSocket
@@ -53,6 +54,12 @@ async def unhandled(_request, exc: Exception) -> JSONResponse:
 
 @app.on_event("startup")
 async def startup() -> None:
+    if settings.use_gemini_backend and settings.gemini_api_key:
+        # Building the SDK client blocks for about a second; do it now, off the
+        # loop, rather than during the first call.
+        from app.services.gemini_service import client_for
+
+        await asyncio.to_thread(client_for, settings.gemini_api_key)
     log.info(
         "startup",
         extra={
@@ -60,5 +67,8 @@ async def startup() -> None:
             "echo_mode": settings.echo_mode,
             "media_stream_url": settings.media_stream_wss_url,
             "signature_validation": settings.validate_twilio_signature,
+            "translation_backend": settings.translation_backend,
+            "translation_model": settings.translation_model,
+            "translation_enabled": settings.translation_enabled,
         },
     )

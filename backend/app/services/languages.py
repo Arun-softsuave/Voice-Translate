@@ -10,7 +10,12 @@ Offering a target it cannot speak means the user finds out mid-call, after
 paying for the call.
 
 `gpt-realtime-2.1` has no such split — it is a general model told what to do in
-a prompt — so in that mode both directions get the full list.
+a prompt — so in that mode both directions get the full core list.
+
+`gemini-3.5-live-translate` documents 70+ languages as BOTH source and target,
+including every Indian language here. It is the only backend offered the
+extended list; the OpenAI sets are deliberately left at the core list, because
+nothing beyond it has been checked against those models.
 
 Note the labels are not only UI text: `realtime_service` interpolates them into
 the model prompt ("Speak only {target}"), so they must stay natural English
@@ -58,7 +63,72 @@ _INTERNATIONAL = [
     Language("vi", "Vietnamese", "Tiếng Việt"),
 ]
 
-ALL: dict[str, Language] = {lang.code: lang for lang in _INDIAN + _INTERNATIONAL}
+# Documented for gemini-3.5-live-translate only. South Asian languages first,
+# for the same reason _INDIAN leads the core list.
+_GEMINI_ONLY = [
+    Language("pa", "Punjabi", "ਪੰਜਾਬੀ"),
+    Language("ur", "Urdu", "اردو"),
+    Language("ne", "Nepali", "नेपाली"),
+    Language("si", "Sinhala", "සිංහල"),
+    Language("sd", "Sindhi", "سنڌي"),
+    Language("af", "Afrikaans", "Afrikaans"),
+    Language("ak", "Akan", "Akan"),
+    Language("sq", "Albanian", "Shqip"),
+    Language("am", "Amharic", "አማርኛ"),
+    Language("ar", "Arabic", "العربية"),
+    Language("hy", "Armenian", "Հայերեն"),
+    Language("az", "Azerbaijani", "Azərbaycan"),
+    Language("eu", "Basque", "Euskara"),
+    Language("be", "Belarusian", "Беларуская"),
+    Language("bg", "Bulgarian", "Български"),
+    Language("my", "Burmese", "မြန်မာ"),
+    Language("ca", "Catalan", "Català"),
+    Language("hr", "Croatian", "Hrvatski"),
+    Language("cs", "Czech", "Čeština"),
+    Language("da", "Danish", "Dansk"),
+    Language("nl", "Dutch", "Nederlands"),
+    Language("et", "Estonian", "Eesti"),
+    Language("fil", "Filipino", "Filipino"),
+    Language("fi", "Finnish", "Suomi"),
+    Language("gl", "Galician", "Galego"),
+    Language("ka", "Georgian", "ქართული"),
+    Language("el", "Greek", "Ελληνικά"),
+    Language("ha", "Hausa", "Hausa"),
+    Language("he", "Hebrew", "עברית"),
+    Language("hu", "Hungarian", "Magyar"),
+    Language("is", "Icelandic", "Íslenska"),
+    Language("jv", "Javanese", "Basa Jawa"),
+    Language("kk", "Kazakh", "Қазақ"),
+    Language("km", "Khmer", "ខ្មែរ"),
+    Language("rw", "Kinyarwanda", "Ikinyarwanda"),
+    Language("lo", "Lao", "ລາວ"),
+    Language("lv", "Latvian", "Latviešu"),
+    Language("lt", "Lithuanian", "Lietuvių"),
+    Language("mk", "Macedonian", "Македонски"),
+    Language("ms", "Malay", "Bahasa Melayu"),
+    Language("mn", "Mongolian", "Монгол"),
+    Language("no", "Norwegian", "Norsk"),
+    Language("fa", "Persian", "فارسی"),
+    Language("pl", "Polish", "Polski"),
+    Language("ro", "Romanian", "Română"),
+    Language("sr", "Serbian", "Српски"),
+    Language("sk", "Slovak", "Slovenčina"),
+    Language("sl", "Slovenian", "Slovenščina"),
+    Language("su", "Sundanese", "Basa Sunda"),
+    Language("sw", "Swahili", "Kiswahili"),
+    Language("sv", "Swedish", "Svenska"),
+    Language("th", "Thai", "ไทย"),
+    Language("tr", "Turkish", "Türkçe"),
+    Language("uk", "Ukrainian", "Українська"),
+    Language("uz", "Uzbek", "Oʻzbek"),
+    Language("zu", "Zulu", "isiZulu"),
+]
+
+CORE: tuple[str, ...] = tuple(lang.code for lang in _INDIAN + _INTERNATIONAL)
+
+ALL: dict[str, Language] = {
+    lang.code: lang for lang in _INDIAN + _INTERNATIONAL + _GEMINI_ONLY
+}
 
 # The 13 targets OpenAI documents for gpt-realtime-translate.
 DOCUMENTED_TRANSLATE_TARGETS = (
@@ -75,13 +145,26 @@ VERIFIED_UNDOCUMENTED_TARGETS = ("ta",)
 TRANSLATE_TARGETS = DOCUMENTED_TRANSLATE_TARGETS + VERIFIED_UNDOCUMENTED_TARGETS
 
 # The translate model detects the source itself and handles 70+ languages, so
-# every language we know about is a valid source.
-TRANSLATE_SOURCES = tuple(ALL)
+# every core language is a valid source.
+TRANSLATE_SOURCES = CORE
 
 # gpt-realtime-2.1 is a general model; it can work in either direction for
 # anything we can name in the prompt.
-REALTIME_TARGETS = tuple(ALL)
-REALTIME_SOURCES = tuple(ALL)
+REALTIME_TARGETS = CORE
+REALTIME_SOURCES = CORE
+
+# Every language Google lists for gemini-3.5-live-translate, both directions.
+GEMINI_TARGETS = tuple(ALL)
+GEMINI_SOURCES = tuple(ALL)
+
+# Gemini wants a script or region on these two; our codes are the bare ones
+# the OpenAI backends and the UI already use.
+GEMINI_CODES = {"zh": "zh-Hans", "pt": "pt-BR"}
+
+
+def gemini_code(code: str) -> str:
+    """The BCP-47 code Gemini expects for one of ours."""
+    return GEMINI_CODES.get(code, code)
 
 
 def _ordered(codes) -> list[dict[str, str]]:
@@ -90,20 +173,32 @@ def _ordered(codes) -> list[dict[str, str]]:
     return [ALL[c].as_dict() for c in ALL if c in wanted]
 
 
-def sources_for(use_translate_backend: bool) -> list[dict[str, str]]:
-    return _ordered(TRANSLATE_SOURCES if use_translate_backend else REALTIME_SOURCES)
+_SOURCES = {
+    "translate": TRANSLATE_SOURCES,
+    "realtime": REALTIME_SOURCES,
+    "gemini": GEMINI_SOURCES,
+}
+_TARGETS = {
+    "translate": TRANSLATE_TARGETS,
+    "realtime": REALTIME_TARGETS,
+    "gemini": GEMINI_TARGETS,
+}
 
 
-def targets_for(use_translate_backend: bool) -> list[dict[str, str]]:
-    return _ordered(TRANSLATE_TARGETS if use_translate_backend else REALTIME_TARGETS)
+def source_codes(backend: str) -> tuple[str, ...]:
+    return _SOURCES[backend]
 
 
-def source_codes(use_translate_backend: bool) -> tuple[str, ...]:
-    return TRANSLATE_SOURCES if use_translate_backend else REALTIME_SOURCES
+def target_codes(backend: str) -> tuple[str, ...]:
+    return _TARGETS[backend]
 
 
-def target_codes(use_translate_backend: bool) -> tuple[str, ...]:
-    return TRANSLATE_TARGETS if use_translate_backend else REALTIME_TARGETS
+def sources_for(backend: str) -> list[dict[str, str]]:
+    return _ordered(source_codes(backend))
+
+
+def targets_for(backend: str) -> list[dict[str, str]]:
+    return _ordered(target_codes(backend))
 
 
 def name_of(code: str) -> str:

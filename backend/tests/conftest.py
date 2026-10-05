@@ -18,6 +18,11 @@ os.environ.setdefault("FRONTEND_URL", "http://localhost:5173")
 # does not override an existing variable, so this also shields the suite from
 # a populated .env sitting next to it.
 os.environ.setdefault("OPENAI_API_KEY", "")
+# Same shield for Gemini, and pin the backend: a developer's .env selecting
+# TRANSLATION_BACKEND=gemini with a real key made the suite open live Gemini
+# sessions and hang.
+os.environ.setdefault("GEMINI_API_KEY", "")
+os.environ.setdefault("TRANSLATION_BACKEND", "translate")
 os.environ.setdefault("DEMO_MODE", "true")
 os.environ.setdefault("ECHO_MODE", "false")
 os.environ.setdefault("VALIDATE_TWILIO_SIGNATURE", "false")

@@ -189,3 +189,40 @@ def test_converters_are_independent():
     quiet = b(audio.ulaw_silence(100))
 
     assert rms(quiet) < 30, "state leaked between converter instances"
+
+
+# ------------------------------------------------------------ gemini input
+from app.utils.resample import GEMINI_IN_RATE, GEMINI_RATIO, TwilioToGemini  # noqa: E402
+
+
+def test_gemini_ratio_is_exact():
+    assert GEMINI_IN_RATE / TWILIO_RATE == 2.0
+    assert GEMINI_RATIO == 2
+
+
+def test_gemini_upsample_doubles_the_sample_count():
+    ulaw = audio.ulaw_silence(20)                 # 160 samples
+    out = TwilioToGemini()(ulaw)
+    assert len(out) // 2 == len(ulaw) * GEMINI_RATIO
+    assert resample.pcm16k_ms(out) == pytest.approx(20, abs=0.5)
+
+
+def test_gemini_upsample_keeps_a_voice_band_tone():
+    """1 kHz at 8 kHz must still be 1 kHz, at roughly the same level, at 16 kHz."""
+    pcm8k = tone(1000, 200, TWILIO_RATE)
+    out = TwilioToGemini()(audio.pcm16_to_ulaw(pcm8k))
+    assert peak_hz(out, GEMINI_IN_RATE) == pytest.approx(1000, abs=20)
+    assert rms(out[200:]) == pytest.approx(rms(pcm8k), rel=0.15)
+
+
+def test_gemini_upsample_has_no_chunk_boundary_clicks():
+    """Same failure mode as the 24 kHz path: a stateless filter buzzes at 50 Hz."""
+    ulaw = audio.pcm16_to_ulaw(tone(700, 400, TWILIO_RATE))
+    whole = TwilioToGemini()(ulaw)
+    conv = TwilioToGemini()
+    chunked = b"".join(conv(ulaw[i:i + 160]) for i in range(0, len(ulaw), 160))
+    assert chunked == whole
+
+
+def test_gemini_upsample_empty_input():
+    assert TwilioToGemini()(b"") == b""
