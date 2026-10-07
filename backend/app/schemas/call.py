@@ -89,4 +89,5 @@ class SessionResponse(BaseModel):
     status: str
     uptime_s: float
     error: str | None = None
+    end_reason: str | None = None
     participants: dict

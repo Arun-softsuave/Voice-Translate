@@ -17,6 +17,7 @@ audio is forwarded, which is what makes the echo test work before phase 7 is set
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -28,17 +29,19 @@ from app.models.session import CallStatus, ParticipantId
 from app.services import session_service
 from app.services.captions import HEARD, SPOKE
 from app.services.gemini_service import GeminiTranslateSession
+from app.services.latency import MARK_PREFIX, SPEECH_RMS
 from app.services.realtime_service import RealtimeTranslator
 from app.services.session_service import registry
 from app.services.translate_service import TranslateSession
 from app.services.translator import Translator
 from app.utils.audio import b64_decode
-from app.utils.vad import SpeechDetector
+from app.utils.vad import SpeechDetector, frame_rms
 from app.websocket import twilio_protocol as proto
 
 log = logging.getLogger(__name__)
 
 MARK_EVERY_FRAMES = 25          # ~500 ms at 20 ms/frame
+FRAME_S = 0.02                  # one Twilio media frame
 
 
 async def media_stream_endpoint(ws: WebSocket) -> None:
@@ -49,6 +52,7 @@ async def media_stream_endpoint(ws: WebSocket) -> None:
     pid: ParticipantId | None = None
     translator: Translator | None = None
     frames_since_mark = 0
+    frames_before_answer = 0
     opened_at = time.monotonic()
 
     # Barge-in lives here rather than in the translator: the translate endpoint
@@ -92,6 +96,7 @@ async def media_stream_endpoint(ws: WebSocket) -> None:
                         stream_sid=start.get("streamSid") or message.get("streamSid"),
                         call_sid=start.get("callSid"),
                         ws=ws,
+                        echo_mode=settings.echo_mode,
                     )
                 except ValueError:
                     log.warning(
@@ -103,7 +108,7 @@ async def media_stream_endpoint(ws: WebSocket) -> None:
                     await ws.close(code=1008)
                     return
 
-                translator = await _open_translator(settings, session, pid)
+                translator = await _adopt_or_open_translator(settings, session, pid)
                 continue
 
             # everything below requires a bound stream
@@ -122,13 +127,38 @@ async def media_stream_endpoint(ws: WebSocket) -> None:
                 if session.status is CallStatus.CONNECTED:
                     session.status = CallStatus.TRANSLATING
 
+                now = time.monotonic()
+                participant.inbound.frame(message["media"].get("timestamp"), now)
+
+                # Nothing is translated until both people are on the call.
+                # Speech while the phone rings would be billed, captioned and
+                # then thrown away, since there is nobody to play it to.
+                if not (settings.echo_mode or session.peer_of(pid).connected):
+                    frames_before_answer += 1
+                    continue
+
+                tracker = session.latency[pid]
+
                 # This speaker starting up interrupts whatever they were being
                 # played, so drop it rather than talking over them.
+                was_speaking = speech.speaking
                 if speech.feed(b64_decode(payload)):
                     log.debug("barge_in",
                               extra={"session_id": session.session_id,
                                      "participant": pid.value})
-                    await session_service.clear_playback(session, pid)
+                    # The detector decides a few frames in; date the start back.
+                    tracker.speech_started(now - speech.onset_frames * FRAME_S)
+                    dropped = await session_service.clear_playback(session, pid)
+                    if dropped:
+                        # Whose translation was cut: the peer's, or our own in
+                        # echo mode.
+                        source = pid if settings.echo_mode else pid.peer
+                        session.latency[source].playback_cleared(dropped)
+                elif was_speaking and not speech.speaking:
+                    tracker.speech_stopped(now - speech.hangover_frames * FRAME_S)
+
+                for record in tracker.finalize_due(now):
+                    _log_turn(session, pid, record)
 
                 if translator is not None:
                     # Translated audio comes back asynchronously and is routed
@@ -147,15 +177,25 @@ async def media_stream_endpoint(ws: WebSocket) -> None:
                 if frames_since_mark >= MARK_EVERY_FRAMES:
                     frames_since_mark = 0
                     target = pid if settings.echo_mode else pid.peer
-                    await session_service.send_mark(
-                        session, target, f"chk-{participant.frames_in}"
-                    )
+                    name = f"chk-{participant.frames_in}"
+                    session.participant(target).marks.sent(name, now)
+                    await session_service.send_mark(session, target, name)
                 continue
 
             # --- playback accounting (needed for barge-in truncation) ------
             if event == proto.EVENT_MARK:
                 name = message.get("mark", {}).get("name", "")
                 participant = session.participant(pid)
+                now = time.monotonic()
+                if name.startswith(MARK_PREFIX):
+                    # A latency probe: the translation it follows has played.
+                    # It must not touch played_ms, which assumes one chk- mark
+                    # per 500 ms of audio.
+                    speaker = _mark_speaker(name)
+                    if speaker is not None:
+                        session.latency[speaker].played(name, now)
+                    continue
+                participant.marks.acked(name, now)
                 participant.played_ms = min(participant.queued_ms,
                                             participant.played_ms + MARK_EVERY_FRAMES * 20)
                 log.debug(
@@ -198,6 +238,7 @@ async def media_stream_endpoint(ws: WebSocket) -> None:
         if translator is not None:
             await translator.close()
         if session and pid:
+            _log_latency_summary(session, pid, translator)
             participant = session.participant(pid)
             log.info(
                 "stream_closed",
@@ -208,6 +249,7 @@ async def media_stream_endpoint(ws: WebSocket) -> None:
                     "frames_in": participant.frames_in,
                     "frames_out": participant.frames_out,
                     "dropped_no_peer": participant.dropped_no_peer,
+                    "frames_before_answer": frames_before_answer,
                     "audio_s_in": round(participant.frames_in * 20 / 1000, 1),
                 },
             )
@@ -249,14 +291,26 @@ async def _open_translator(settings, session, pid: ParticipantId):
     speaker = session.participant(pid)
     counterpart = session.peer_of(pid)
 
+    tracker = session.latency[pid]
+    listener = pid if settings.echo_mode else pid.peer
+
     async def deliver(audio_b64: str) -> None:
         await session_service.route_audio(
             session, pid, audio_b64, echo_mode=settings.echo_mode
         )
+        # Latency: when translated *speech* (not the near-silent filler the
+        # model also sends) reaches us, plus a mark so Twilio tells us when it
+        # has actually been played.
+        is_speech = frame_rms(b64_decode(audio_b64)) > SPEECH_RMS
+        mark = tracker.audio_out(time.monotonic(), is_speech)
+        if mark is not None:
+            await session_service.send_mark(session, listener, mark)
 
     async def caption(direction: str, text: str) -> None:
         # "in" is what this participant said, "out" is the translation.
         session.captions.add(pid, HEARD if direction == "in" else SPOKE, text)
+        if direction == "in":
+            tracker.heard(time.monotonic())
 
     backend = translator_class(settings)
     translator = backend(
@@ -287,4 +341,95 @@ async def _open_translator(settings, session, pid: ParticipantId):
                "backend": backend.__name__, "model": settings.translation_model,
                "direction": f"{speaker.language}->{counterpart.language}"},
     )
+
+    speaker.ready_at = time.monotonic()
     return translator
+
+
+def prewarm_translator(settings, session, pid: ParticipantId) -> None:
+    """Start opening this leg's translator before its media stream exists.
+
+    Called when Twilio fetches the leg's TwiML. Twilio then takes ~0.8 s to
+    open the stream; connecting the model in that window means the first
+    sentence no longer waits for it. The stream handler adopts the result.
+    """
+    if not settings.translation_enabled or pid in session.translator_tasks:
+        return
+    session.translator_tasks[pid] = asyncio.create_task(
+        _open_translator(settings, session, pid)
+    )
+
+
+async def _adopt_or_open_translator(settings, session, pid: ParticipantId):
+    task = session.translator_tasks.pop(pid, None)
+    translator = None
+    if task is not None:
+        try:
+            translator = await task
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            translator = None
+    prewarmed = translator is not None
+    if translator is None:
+        # Not prewarmed, or the early attempt failed: one more try now.
+        translator = await _open_translator(settings, session, pid)
+
+    # How long this leg waited, after its stream arrived, for a translator.
+    # Audio arriving meanwhile queues in the socket and delays the first
+    # sentence; with prewarming this is ~0.
+    speaker = session.participant(pid)
+    waited = None
+    if speaker.bound_at is not None and speaker.ready_at is not None:
+        waited = max(0, round((speaker.ready_at - speaker.bound_at) * 1000))
+    log.info(
+        "latency_setup",
+        extra={"session_id": session.session_id, "participant": pid.value,
+               "prewarmed": prewarmed,
+               "answered_to_twiml_ms": _between(speaker.answered_at, speaker.twiml_at),
+               "twiml_to_stream_ms": _between(speaker.twiml_at, speaker.bound_at),
+               "stream_to_ready_ms": waited},
+    )
+    return translator
+
+
+# --- latency logging ----------------------------------------------------------
+def _between(a: float | None, b: float | None) -> int | None:
+    return round((b - a) * 1000) if a is not None and b is not None else None
+
+
+def _mark_speaker(name: str) -> ParticipantId | None:
+    """`lat:<speaker>:<turn>:<seq>` -> the speaker whose translation it follows."""
+    try:
+        return ParticipantId(name.split(":")[1])
+    except (IndexError, ValueError):
+        return None
+
+
+def _direction(session, pid: ParticipantId) -> str:
+    return f"{session.participant(pid).language}->{session.peer_of(pid).language}"
+
+
+def _log_turn(session, pid: ParticipantId, record: dict) -> None:
+    """One sentence: how long each stage took. Timings only, never words."""
+    log.info(
+        "latency_turn",
+        extra={"session_id": session.session_id, "speaker": pid.value,
+               "direction": _direction(session, pid), **record},
+    )
+
+
+def _log_latency_summary(session, pid: ParticipantId, translator) -> None:
+    """End of this leg: every sentence's figures, then the call-level ones."""
+    tracker = session.latency[pid]
+    for record in tracker.flush(time.monotonic()):
+        _log_turn(session, pid, record)
+    participant = session.participant(pid)
+    log.info(
+        "latency_summary",
+        extra={"session_id": session.session_id, "speaker": pid.value,
+               "direction": _direction(session, pid),
+               **tracker.summary(),
+               # Round trip server <-> Twilio on this leg; half is one way.
+               "twilio_rtt_ms": participant.marks.rtt_ms,
+               "model_rtt_ms": getattr(translator, "rtt_ms", None),
+               **participant.inbound.summary()},
+    )

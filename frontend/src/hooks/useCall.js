@@ -12,11 +12,16 @@ const POLL_MS = 1500
  * State comes from two real sources and nowhere else:
  *   - the Twilio SDK, for this browser's own leg
  *   - the backend session, for the far leg and the media stream
+ *
+ * The SDK's `accept` only means our own line is up, so it moves the call to
+ * RINGING; from then on the backend's status (which hears Twilio's ringing /
+ * answered / busy events for the phone) decides.
  */
 export function useCall() {
   const [state, setState] = useState(State.IDLE)
   const [sessionId, setSessionId] = useState(null)
   const [session, setSession] = useState(null)
+  const [endReason, setEndReason] = useState(null)
   const [error, setError] = useState(null)
   const [muted, setMuted] = useState(false)
   const [levels, setLevels] = useState({ input: 0, output: 0 })
@@ -25,6 +30,7 @@ export function useCall() {
   const voice = useRef(null)
   const stateRef = useRef(state)
   stateRef.current = state
+  const backendStatus = useRef(null)
 
   const fail = useCallback((message) => {
     setError(message)
@@ -49,7 +55,9 @@ export function useCall() {
       try {
         const snapshot = await api.session(sessionId)
         if (cancelled) return
+        backendStatus.current = snapshot.status
         setSession(snapshot)
+        if (snapshot.end_reason) setEndReason(snapshot.end_reason)
         setState((local) => reconcile(local, snapshot.status))
       } catch (err) {
         // A 404 means the backend already tore the session down.
@@ -67,12 +75,30 @@ export function useCall() {
     }
   }, [sessionId, state])
 
+  /**
+   * When the call ends, ask once why. The backend hangs up our leg itself on
+   * busy / no answer, which ends polling before it could see the reason; it
+   * keeps the ended call readable for a while for exactly this.
+   */
+  useEffect(() => {
+    if (state !== State.ENDED || !sessionId || endReason) return
+    let cancelled = false
+    api.session(sessionId)
+      .then((snapshot) => {
+        if (!cancelled && snapshot?.end_reason) setEndReason(snapshot.end_reason)
+      })
+      .catch(() => { /* forgotten already: nothing to explain */ })
+    return () => { cancelled = true }
+  }, [state, sessionId, endReason])
+
   const start = useCallback(
     async ({ sourceLanguage, targetLanguage, phoneNumber }) => {
       setError(null)
       setSeconds(0)
       setSession(null)
+      setEndReason(null)
       setMuted(false)
+      backendStatus.current = null
       setState(State.CONNECTING)
 
       try {
@@ -84,9 +110,13 @@ export function useCall() {
         const { token } = await api.token()
 
         const connection = new VoiceConnection({
-          onAccept: () => setState(State.CONNECTED),
+          // Our own line is up. Whether the other person answered is the
+          // backend's call, so start from "ringing" and let it move us on.
+          onAccept: () => setState((s) => reconcile(
+            s === State.CONNECTING ? State.RINGING : s, backendStatus.current)),
           onReconnecting: () => setState(State.RECONNECTING),
-          onReconnected: () => setState(State.CONNECTED),
+          onReconnected: () => setState(() =>
+            reconcile(State.RINGING, backendStatus.current)),
           onVolume: (input, output) => setLevels({ input, output }),
           onDisconnect: (reason) => {
             setLevels({ input: 0, output: 0 })
@@ -115,7 +145,8 @@ export function useCall() {
     setState(State.ENDED)
     if (sessionId) {
       try {
-        await api.end(sessionId)
+        const ended = await api.end(sessionId)
+        if (ended?.end_reason) setEndReason(ended.end_reason)
       } catch {
         /* the backend may have ended it already */
       }
@@ -132,9 +163,11 @@ export function useCall() {
   const reset = useCallback(() => {
     voice.current?.disconnect()
     voice.current = null
+    backendStatus.current = null
     setState(State.IDLE)
     setSessionId(null)
     setSession(null)
+    setEndReason(null)
     setError(null)
     setSeconds(0)
     setLevels({ input: 0, output: 0 })
@@ -146,6 +179,7 @@ export function useCall() {
     state,
     session,
     sessionId,
+    endReason,
     error,
     muted,
     levels,

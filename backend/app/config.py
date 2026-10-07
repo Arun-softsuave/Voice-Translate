@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from functools import lru_cache
+from pathlib import Path
 from urllib.parse import urlparse
 
 from dotenv import load_dotenv
@@ -96,6 +97,12 @@ class Settings:
     validate_twilio_signature: bool
     log_level: str
 
+    # How long Twilio lets the phone ring before reporting no-answer.
+    ring_timeout_s: int = 60
+    # Where logs are also written; empty disables the file. Relative paths are
+    # relative to the backend folder, wherever uvicorn was started from.
+    log_file: str = ""
+
     allowed_destination_prefixes: tuple[str, ...] = field(default=("+91",))
 
     @property
@@ -136,6 +143,18 @@ class Settings:
         return f"wss://{host}/ws/media-stream"
 
 
+BACKEND_DIR = Path(__file__).resolve().parent.parent
+
+
+def _log_file() -> str:
+    raw = os.getenv("LOG_FILE")
+    value = "logs/backend.log" if raw is None else raw.strip()
+    if not value:
+        return ""
+    path = Path(value)
+    return str(path if path.is_absolute() else BACKEND_DIR / path)
+
+
 @lru_cache
 def get_settings() -> Settings:
     return Settings(
@@ -158,4 +177,6 @@ def get_settings() -> Settings:
         echo_mode=_bool("ECHO_MODE", False),
         validate_twilio_signature=_bool("VALIDATE_TWILIO_SIGNATURE", True),
         log_level=_opt("LOG_LEVEL", "INFO").upper(),
+        ring_timeout_s=int(_opt("RING_TIMEOUT_S", "60") or 60),
+        log_file=_log_file(),
     )

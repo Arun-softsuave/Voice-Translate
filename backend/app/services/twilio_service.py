@@ -141,6 +141,7 @@ class TwilioClient:
             status_callback=f"{s.backend_public_url}/api/call/status",
             status_callback_event=["initiated", "ringing", "answered", "completed"],
             status_callback_method="POST",
+            timeout=s.ring_timeout_s,
         )
         return call.sid
 

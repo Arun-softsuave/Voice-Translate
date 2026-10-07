@@ -12,11 +12,13 @@ from enum import Enum
 from typing import Any
 
 from app.services.captions import CaptionLog
+from app.services.latency import InboundClock, LatencyTracker, MarkClock
 
 
 class CallStatus(str, Enum):
     CONNECTING = "CONNECTING"
     RINGING = "RINGING"
+    ANSWERED = "ANSWERED"            # the phone was picked up; its stream is on its way
     CONNECTED = "CONNECTED"
     TRANSLATING = "TRANSLATING"
     RECONNECTING = "RECONNECTING"
@@ -50,6 +52,14 @@ class Participant:
     played_ms: float = 0.0              # advanced by Twilio `mark` acks
     queued_ms: float = 0.0              # audio handed to Twilio, not yet acked
 
+    # Latency instrumentation (monotonic seconds; never what was said).
+    answered_at: float | None = None    # Twilio: the phone was picked up
+    twiml_at: float | None = None       # Twilio fetched our TwiML
+    bound_at: float | None = None       # its media stream reached us
+    ready_at: float | None = None       # its translator could take audio
+    marks: MarkClock = field(default_factory=MarkClock, repr=False)
+    inbound: InboundClock = field(default_factory=InboundClock, repr=False)
+
     @property
     def connected(self) -> bool:
         return self.ws is not None and self.stream_sid is not None
@@ -63,8 +73,21 @@ class TranslationSession:
     status: CallStatus = CallStatus.CONNECTING
     created_at: float = field(default_factory=time.monotonic)
     error: str | None = None
+    # Why the call ended, from Twilio's CallStatus or our own hang-up:
+    # busy | declined | no-answer | failed | canceled | completed | user_ended
+    end_reason: str | None = None
+    ended_at: float | None = None
+    # Translators opened while Twilio was still connecting a leg's stream,
+    # keyed by participant. The stream handler adopts them.
+    translator_tasks: dict = field(default_factory=dict, repr=False)
     # Never part of snapshot(): captions are what people said.
     captions: CaptionLog = field(default_factory=CaptionLog, repr=False)
+    # One per speaker: the timings of that person's sentences being translated.
+    latency: dict = field(
+        default_factory=lambda: {ParticipantId.A: LatencyTracker("A"),
+                                 ParticipantId.B: LatencyTracker("B")},
+        repr=False,
+    )
 
     def participant(self, pid: ParticipantId) -> Participant:
         return self.a if pid is ParticipantId.A else self.b
@@ -83,6 +106,7 @@ class TranslationSession:
             "status": self.status.value,
             "uptime_s": round(time.monotonic() - self.created_at, 1),
             "error": self.error,
+            "end_reason": self.end_reason,
             "participants": {
                 p.participant_id.value: {
                     "kind": p.kind,
@@ -92,6 +116,7 @@ class TranslationSession:
                     "frames_out": p.frames_out,
                     "dropped_no_peer": p.dropped_no_peer,
                     "played_ms": round(p.played_ms),
+                    "answered": p.answered_at is not None,
                 }
                 for p in (self.a, self.b)
             },

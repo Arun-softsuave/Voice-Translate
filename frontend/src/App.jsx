@@ -81,6 +81,7 @@ export default function App() {
           phoneNumber={request.current.phone}
           demoMode={demoMode}
           captions={captions.lines}
+          endReason={call.endReason}
           now={captions.now}
           onHangUp={call.hangUp}
           onToggleMute={call.toggleMute}

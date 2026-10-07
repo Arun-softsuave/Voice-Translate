@@ -11,8 +11,10 @@ concurrent calls structurally impossible rather than merely unlikely.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import secrets
+import time
 from typing import Iterable
 
 from app.models.session import (
@@ -26,6 +28,10 @@ from app.websocket import twilio_protocol as proto
 
 log = logging.getLogger(__name__)
 
+# How long an ended call stays readable, so the browser can learn *why* it
+# ended (busy, no answer, ...) after its own leg has already been hung up.
+ENDED_TTL_S = 120.0
+
 
 class SessionRegistry:
     """In-process session store.
@@ -37,6 +43,7 @@ class SessionRegistry:
 
     def __init__(self) -> None:
         self._sessions: dict[str, TranslationSession] = {}
+        self._ended: dict[str, TranslationSession] = {}
 
     # --- lifecycle --------------------------------------------------------
     def create(
@@ -63,6 +70,7 @@ class SessionRegistry:
             ),
         )
         self._sessions[session_id] = session
+        self._purge_ended()
         log.info(
             "session_created",
             extra={
@@ -84,8 +92,33 @@ class SessionRegistry:
         session = self._sessions.pop(session_id, None)
         if session:
             session.captions.close()
+            _discard_prewarmed(session)
             log.info("session_removed", extra={"session_id": session_id,
                                                 **session.snapshot()["participants"]})
+
+    def end(self, session: TranslationSession, reason: str) -> None:
+        """Finish a call but keep it readable for ENDED_TTL_S.
+
+        Live lookups (`get`, used by TwiML, media streams and captions) stop
+        finding it immediately; only `get_ended` still does, for the status
+        endpoint the browser polls.
+        """
+        session.status = CallStatus.ENDED
+        if session.end_reason is None:
+            session.end_reason = reason
+        session.ended_at = time.monotonic()
+        self.remove(session.session_id)
+        self._ended[session.session_id] = session
+        self._purge_ended()
+
+    def get_ended(self, session_id: str) -> TranslationSession | None:
+        self._purge_ended()
+        return self._ended.get(session_id)
+
+    def _purge_ended(self) -> None:
+        cutoff = time.monotonic() - ENDED_TTL_S
+        for sid in [k for k, s in self._ended.items() if (s.ended_at or 0) < cutoff]:
+            self._ended.pop(sid, None)
 
     def find_by_call_sid(self, call_sid: str) -> tuple[TranslationSession, ParticipantId] | None:
         for session in self._sessions.values():
@@ -103,6 +136,7 @@ class SessionRegistry:
         stream_sid: str,
         call_sid: str | None,
         ws,
+        echo_mode: bool = False,
     ) -> Participant:
         participant = session.participant(pid)
         if participant.connected:
@@ -111,9 +145,11 @@ class SessionRegistry:
             )
         participant.stream_sid = stream_sid
         participant.ws = ws
+        participant.bound_at = time.monotonic()
         if call_sid:
             participant.call_sid = call_sid
-        if session.both_connected:
+        # In echo mode there is only ever one leg, and it is the whole call.
+        if session.both_connected or echo_mode:
             session.status = CallStatus.CONNECTED
         log.info(
             "stream_bound",
@@ -136,6 +172,27 @@ class SessionRegistry:
             "stream_unbound",
             extra={"session_id": session.session_id, "participant": pid.value},
         )
+
+
+def _discard_prewarmed(session: TranslationSession) -> None:
+    """Close translators opened for a leg whose stream never arrived.
+
+    A declined or unanswered call ends before Twilio streams the phone leg, so
+    a translator prepared for it would otherwise stay connected to the model.
+    """
+    tasks, session.translator_tasks = session.translator_tasks, {}
+    for task in tasks.values():
+        if not task.done():
+            task.cancel()
+            continue
+        if task.cancelled() or task.exception() is not None:
+            continue
+        translator = task.result()
+        if translator is not None:
+            try:
+                asyncio.get_running_loop().create_task(translator.close())
+            except RuntimeError:            # no loop: nothing left to close with
+                pass
 
 
 # --- the routing rule -------------------------------------------------------
@@ -169,11 +226,14 @@ async def route_audio(
     return sent
 
 
-async def clear_playback(session: TranslationSession, target: ParticipantId) -> None:
-    """Barge-in: drop everything buffered for `target` (design doc §8.2)."""
+async def clear_playback(session: TranslationSession, target: ParticipantId) -> float:
+    """Barge-in: drop everything buffered for `target` (design doc §8.2).
+
+    Returns how many milliseconds of queued audio were thrown away.
+    """
     participant = session.participant(target)
     if not participant.connected:
-        return
+        return 0.0
     await proto.send(participant.ws, proto.build_clear(participant.stream_sid))
     dropped = participant.queued_ms - participant.played_ms
     participant.queued_ms = participant.played_ms
@@ -185,6 +245,7 @@ async def clear_playback(session: TranslationSession, target: ParticipantId) -> 
             "dropped_ms": round(max(dropped, 0.0)),
         },
     )
+    return max(dropped, 0.0)
 
 
 async def send_mark(

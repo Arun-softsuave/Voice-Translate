@@ -27,3 +27,5 @@ os.environ.setdefault("DEMO_MODE", "true")
 os.environ.setdefault("ECHO_MODE", "false")
 os.environ.setdefault("VALIDATE_TWILIO_SIGNATURE", "false")
 os.environ.setdefault("LOG_LEVEL", "CRITICAL")
+# Tests must never write into the developer's real log file.
+os.environ.setdefault("LOG_FILE", "")

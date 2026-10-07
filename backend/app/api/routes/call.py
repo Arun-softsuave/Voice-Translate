@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
@@ -22,11 +23,15 @@ from app.schemas.call import (
 from app.services import twilio_service
 from app.services.captions import view
 from app.services.session_service import registry
+from app.websocket.media_stream import prewarm_translator
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/call", tags=["call"])
 
 TOKEN_TTL = 3600
+# Twilio's final CallStatus values, and what we tell the user about each.
+TERMINAL = ("completed", "busy", "failed", "no-answer", "canceled")
+SIP_DECLINE = "603"
 # A comment line this often keeps ngrok and other proxies from closing an
 # idle caption stream during a long pause in the conversation.
 CAPTION_PING_S = 15.0
@@ -128,6 +133,11 @@ async def twiml(participant: str, request: Request, settings: Settings = Depends
     call_sid = form.get("CallSid")
     if call_sid:
         session.participant(pid).call_sid = call_sid
+    session.participant(pid).twiml_at = time.monotonic()
+
+    # Open this leg's translator now, while Twilio is still setting up its
+    # media stream (~0.8 s), so the first sentence does not wait for it.
+    prewarm_translator(settings, session, pid)
 
     xml = twilio_service.build_stream_twiml(settings, session.session_id, pid)
     log.info("twiml_served",
@@ -154,25 +164,45 @@ async def status_callback(request: Request, settings: Settings = Depends(_settin
         return Response(status_code=204)
 
     session, pid = found
+    sip_code = form.get("SipResponseCode") or None
     log.info("call_status",
              extra={"session_id": session.session_id, "participant": pid.value,
-                    "call_status": call_status})
+                    "call_status": call_status, "sip_code": sip_code,
+                    "error_code": form.get("ErrorCode") or None})
 
-    if call_status in ("completed", "busy", "failed", "no-answer", "canceled"):
-        _teardown(session, settings, reason=call_status)
+    # Twilio is the only party that knows what the phone did, so it alone
+    # moves the far side through ringing -> answered -> ended.
+    if call_status in TERMINAL:
+        reason = call_status
+        if call_status == "busy" and sip_code == SIP_DECLINE:
+            reason = "declined"
+        _teardown(session, settings, reason=reason)
     elif call_status == "ringing":
-        session.status = CallStatus.RINGING
+        if session.status in (CallStatus.CONNECTING, CallStatus.RINGING):
+            session.status = CallStatus.RINGING
+    elif call_status == "in-progress":
+        session.participant(pid).answered_at = time.monotonic()
+        if session.status in (CallStatus.CONNECTING, CallStatus.RINGING):
+            session.status = CallStatus.ANSWERED
 
     return Response(status_code=204)
 
 
 @router.post("/end/{session_id}")
-def end_call(session_id: str, settings: Settings = Depends(_settings)):
+async def end_call(session_id: str, settings: Settings = Depends(_settings)):
     session = registry.get(session_id)
     if session is None:
+        ended = registry.get_ended(session_id)
+        if ended is not None:                       # already over: say how
+            return {"session_id": session_id, "status": ended.status.value,
+                    "end_reason": ended.end_reason}
         raise HTTPException(404, {"code": "UNKNOWN_SESSION", "message": "No such call."})
-    _teardown(session, settings, reason="user_ended")
-    return {"session_id": session_id, "status": session.status.value}
+    # Hanging up before the other side picked up is a cancelled call.
+    b = session.b
+    answered = b.answered_at is not None or b.connected
+    _teardown(session, settings, reason="user_ended" if answered else "canceled")
+    return {"session_id": session_id, "status": session.status.value,
+            "end_reason": session.end_reason}
 
 
 @router.get("/{session_id}/captions")
@@ -225,7 +255,8 @@ async def captions(session_id: str, viewer: str = "A",
 
 @router.get("/{session_id}", response_model=SessionResponse)
 def get_session(session_id: str):
-    session = registry.get(session_id)
+    # Ended calls stay readable for a while so the browser can learn why.
+    session = registry.get(session_id) or registry.get_ended(session_id)
     if session is None:
         raise HTTPException(404, {"code": "UNKNOWN_SESSION", "message": "No such call."})
     return SessionResponse(**session.snapshot())
@@ -239,6 +270,5 @@ def _teardown(session, settings: Settings, *, reason: str) -> None:
         for participant in (session.a, session.b):
             if participant.call_sid:
                 client.hangup(participant.call_sid)
-    session.status = CallStatus.ENDED
     log.info("call_ended", extra={"session_id": session.session_id, "reason": reason})
-    registry.remove(session.session_id)
+    registry.end(session, reason)

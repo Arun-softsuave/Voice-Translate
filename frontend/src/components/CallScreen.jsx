@@ -1,4 +1,4 @@
-import { State, label, tone } from '../lib/callState'
+import { State, endMessage, endShort, isAnswered, label, tone } from '../lib/callState'
 import { labelOf } from '../lib/languages'
 import { format } from '../lib/phone'
 import { Captions } from './Captions'
@@ -23,12 +23,15 @@ export function CallScreen({
   catalogue = [],
   captions = [],
   now = 0,
+  endReason = null,
   onHangUp,
   onToggleMute,
   onReset,
 }) {
   const finished = state === State.ENDED || state === State.ERROR
   const translating = state === State.TRANSLATING
+  const answered = isAnswered(state)
+  const endNote = finished ? endMessage(endReason) : null
   const speaking = levels.input > 0.06
   const listening = levels.output > 0.06
 
@@ -66,7 +69,7 @@ export function CallScreen({
           <div className={`bridge${translating ? ' bridge--active' : ''}`}>
             <span className="bridge__line" />
             <span className="bridge__label">
-              {translating ? 'Translating' : 'Standing by'}
+              {translating ? 'Translating' : answered ? 'Connecting audio' : finished ? 'Ended' : 'Waiting for answer'}
             </span>
             <span className="bridge__line" />
           </div>
@@ -80,13 +83,8 @@ export function CallScreen({
               <span className="party__lang">{labelOf(target, catalogue)}</span>
             </span>
             <span className="party__meta">
-              {b?.connected ? (
-                <Meter level={levels.output} />
-              ) : (
-                <Status tone={finished ? 'idle' : 'wait'}>
-                  {finished ? 'Disconnected' : 'Waiting'}
-                </Status>
-              )}
+              {farSide({ state, finished, answered, connected: b?.connected,
+                         endReason, level: levels.output })}
             </span>
           </div>
         </div>
@@ -97,6 +95,9 @@ export function CallScreen({
       </div>
 
       <footer className="call__foot">
+        {endNote && (
+          <p className="call__note" role="status">{endNote}</p>
+        )}
         {session && (
           <div className="diag">
             <span className="diag__item">
@@ -151,4 +152,14 @@ export function CallScreen({
       </footer>
     </section>
   )
+}
+
+/** What the other person's panel says: the truth from Twilio, not a guess. */
+function farSide({ state, finished, answered, connected, endReason, level }) {
+  if (finished) {
+    return <Status tone="idle">{endShort(endReason) ?? 'Disconnected'}</Status>
+  }
+  if (connected) return <Meter level={level} />
+  if (answered) return <Status tone="live">Answered</Status>
+  return <Status tone="wait">{state === State.CONNECTING ? 'Calling…' : 'Ringing…'}</Status>
 }

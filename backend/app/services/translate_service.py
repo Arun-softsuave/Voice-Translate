@@ -48,6 +48,7 @@ TRANSLATE_URL = "wss://api.openai.com/v1/realtime/translations"
 SILENCE_FRAME_MS = 20
 MAX_GAP_MS = 400.0          # beyond this we stop back-filling and just resync
 CLOSE_TIMEOUT_S = 3.0
+RTT_TIMEOUT_S = 2.0
 
 
 class TranslateSession:
@@ -86,6 +87,7 @@ class TranslateSession:
         self._speech_stopped_at: float | None = None
         self.first_audio_ms: float | None = None
         self.responses = 0
+        self.rtt_ms: int | None = None   # network round trip to OpenAI
 
         self.usage = Usage(model=settings.openai_translate_model)
         self._audio_in_ms = 0.0
@@ -105,11 +107,22 @@ class TranslateSession:
         self._ws = await websockets.connect(url, **kwargs)
         await self._configure_session()
         self._reader = asyncio.create_task(self._read_loop())
+        self._rtt_task = asyncio.create_task(self._measure_rtt(self._ws))
         log.info(
             "translate_connected",
             extra={"label": self.label,
                    "direction": f"{self.source_language}->{self.target_language}"},
         )
+
+    async def _measure_rtt(self, ws) -> None:
+        """One WebSocket ping, for the latency logs. Never blocks the call."""
+        try:
+            started = time.monotonic()
+            pong = await ws.ping()
+            await asyncio.wait_for(pong, RTT_TIMEOUT_S)
+            self.rtt_ms = round((time.monotonic() - started) * 1000)
+        except Exception:  # noqa: BLE001 - a missing figure, not a failure
+            self.rtt_ms = None
 
     async def _configure_session(self) -> None:
         """Only these three fields are accepted.
@@ -151,8 +164,9 @@ class TranslateSession:
         except Exception:  # noqa: BLE001
             pass
 
-        if self._reader:
-            self._reader.cancel()
+        for task in (self._reader, getattr(self, "_rtt_task", None)):
+            if task:
+                task.cancel()
         if self._ws:
             try:
                 await self._ws.close()

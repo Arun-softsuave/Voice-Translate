@@ -83,3 +83,39 @@ describe('CallScreen captions', () => {
     expect(html).toContain('will appear here as text')
   })
 })
+
+describe('CallScreen far side', () => {
+  it('says Ringing while the phone rings, not Connected', () => {
+    const html = render({ state: State.RINGING, captions: [],
+      session: { participants: { A: { connected: true }, B: { connected: false } } } })
+    expect(html).toContain('Ringing…')
+    expect(html).toContain('Waiting for answer')
+    expect(html).not.toContain('>Connected<')
+  })
+
+  it('says Answered once they pick up, before their audio arrives', () => {
+    const html = render({ state: State.ANSWERED, captions: [],
+      session: { participants: { A: { connected: true }, B: { connected: false } } } })
+    expect(html).toContain('Answered')
+    expect(html).toContain('Connecting audio')
+  })
+
+  it('explains why a call did not connect', () => {
+    const html = render({ state: State.ENDED, captions: [], endReason: 'no-answer',
+      session: { participants: { A: { connected: false }, B: { connected: false } } } })
+    expect(html).toContain('No answer.')
+    expect(html).toContain('call__note')
+  })
+
+  it('shows busy-or-declined for a declined call reported as busy', () => {
+    const html = render({ state: State.ENDED, captions: [], endReason: 'busy',
+      session: { participants: { A: { connected: false }, B: { connected: false } } } })
+    expect(html).toContain('Busy / declined')
+  })
+
+  it('an ordinary hang-up shows no extra note', () => {
+    const html = render({ state: State.ENDED, captions: [], endReason: 'completed',
+      session: { participants: { A: { connected: false }, B: { connected: false } } } })
+    expect(html).not.toContain('call__note')
+  })
+})

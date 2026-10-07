@@ -621,6 +621,17 @@ body:has(.call) { --foot-h: 128px; }
 @media (min-width: 900px) {
   :root { --meter-scale: 1.6; }
 
+  /* The bridge is a narrow column here (88-150 px). Longer states such as
+     "Waiting for answer" must wrap inside it; on one line they overflow and
+     the second party's card covers the end of the text. */
+  .bridge__label {
+    white-space: normal;
+    text-align: center;
+    max-width: 100%;
+    line-height: 1.6;
+    text-wrap: balance;
+  }
+
   .parties {
     grid-template-rows: none;
     grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
@@ -631,10 +642,13 @@ body:has(.call) { --foot-h: 128px; }
 
   .party__badge { width: 56px; height: 56px; font-size: 1.75rem; }
 
+  /* Wide enough that the longest one-word state ("Translating", ~90 px at
+     this tracking) fits at every desktop width; multi-word states wrap. */
   .bridge {
     flex-direction: column;
-    width: clamp(88px, 8vw, 150px);
-    padding: var(--s5) var(--s3);
+    width: clamp(112px, 9vw, 160px);
+    padding: var(--s5) var(--s2);
+    letter-spacing: var(--track-mid);
   }
 
   .bridge__line {
@@ -943,4 +957,15 @@ body:has(.call) { --foot-h: 128px; }
 @media (max-height: 640px) {
   .call--captions { block-size: auto; }
   .captions__list { max-block-size: 60svh; }
+}
+
+
+/* One-line explanation when a call ends without connecting (busy, no
+   answer...). Lives inside the footer so the call grid keeps its three rows. */
+.call__note {
+  margin: 0;
+  padding: var(--s3) clamp(1.25rem, 4vw, 3rem) 0;
+  text-align: center;
+  color: var(--text-soft);
+  font-size: var(--t-sm);
 }

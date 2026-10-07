@@ -131,6 +131,8 @@ Media Stream WebSocket and bidirectional audio injection all at once.
 | `FRONTEND_URL` | CORS origin |
 | `DEMO_MODE` | `true` = browser↔browser, no PSTN call, no telephony spend |
 | `ECHO_MODE` | Milestone 2 only: route audio back to its sender. Use headphones |
+| `LOG_FILE` | Where logs are also saved (default `logs/backend.log`, rotated; empty = off) |
+| `RING_TIMEOUT_S` | Seconds the phone may ring before the call ends as "No answer" (default 60) |
 | `VALIDATE_TWILIO_SIGNATURE` | Leave `true` outside local tests |
 
 No secret is ever sent to the browser. The frontend receives only a
@@ -159,7 +161,34 @@ pair end to end before you place a call.
 answer. If its undocumented Tamil support ever regresses, set
 `OPENAI_TRANSLATE_MODE=realtime` and restart — both backends are fully tested.
 
-Compare them on a real call by watching `translation_latency` in the logs.
+Compare them on a real call with the latency report below.
+
+## Measuring latency
+
+Every call logs where its time went, without logging anything that was said:
+
+- `latency_setup`: per leg, how long from answer to TwiML, from TwiML to media stream, and from stream to translator ready.
+- `latency_turn`: per sentence:
+  - `model_ms`: speaker starts → translated speech reaches us
+  - `twilio_ms`: we send it → Twilio confirms it played
+  - `start_lag_ms` and `end_lag_ms`
+
+  Both lags are measured so that a long sentence does not inflate the figure.
+- `latency_summary`: per speaker, median, p90 and worst of each stage, plus:
+  - the server↔Twilio round trip
+  - the server↔model round trip
+  - how late inbound audio arrived
+  - barge-in cuts
+  - speech that was never translated
+
+The backend also saves every log line to `backend/logs/backend.log`
+automatically. The file rotates at 10 MB and keeps 5 old copies. Set `LOG_FILE`
+to change the location, or set it empty to turn the file off. To see the
+newest call as a table:
+
+```powershell
+python scripts/latency_report.py --last 1
+```
 
 ## Demo mode vs PSTN
 

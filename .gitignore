@@ -14,3 +14,6 @@ build/
 
 # Probe outputs, regenerated on every run
 backend/gemini_probe_*.wav
+
+# Backend log files (rotated copies end in .1, .2, ...)
+backend/logs/

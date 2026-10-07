@@ -57,6 +57,7 @@ CHUNK_BYTES = resample.GEMINI_IN_RATE * 2 * CHUNK_MS // 1000
 MIN_HEALTHY_S = 10.0
 MAX_FAILED_RECONNECTS = 3
 RECONNECT_BACKOFF_S = 0.5
+RTT_TIMEOUT_S = 2.0
 
 TranscriptCallback = Callable[[str, str], Awaitable[None]]
 
@@ -118,6 +119,8 @@ class GeminiTranslateSession:
         self.first_audio_ms: float | None = None
         self.responses = 0
         self.reconnects = 0
+        self.rtt_ms: int | None = None   # network round trip to Google
+        self._rtt_task: asyncio.Task | None = None
 
         self.usage = Usage(model=settings.gemini_translate_model)
         self._audio_in_ms = 0.0
@@ -139,12 +142,25 @@ class GeminiTranslateSession:
         self._client = await asyncio.to_thread(client_for, self._settings.gemini_api_key)
         await self._open()
         self._reader = asyncio.create_task(self._read_loop())
+        ws = getattr(self._session, "_ws", None)
+        if ws is not None:
+            self._rtt_task = asyncio.create_task(self._measure_rtt(ws))
         log.info(
             "gemini_connected",
             extra={"label": self.label,
                    "model": self._settings.gemini_translate_model,
                    "direction": f"{self.source_language}->{self.target_language}"},
         )
+
+    async def _measure_rtt(self, ws) -> None:
+        """One WebSocket ping, for the latency logs. Never blocks the call."""
+        try:
+            started = time.monotonic()
+            pong = await ws.ping()
+            await asyncio.wait_for(pong, RTT_TIMEOUT_S)
+            self.rtt_ms = round((time.monotonic() - started) * 1000)
+        except Exception:  # noqa: BLE001 - a missing figure, not a failure
+            self.rtt_ms = None
 
     async def _open(self) -> None:
         """Open one Live session. Raises if the server refuses the setup."""
@@ -174,9 +190,11 @@ class GeminiTranslateSession:
             return
         self._closed = True
 
-        if self._reader:
-            self._reader.cancel()
-            await asyncio.gather(self._reader, return_exceptions=True)
+        for task in (self._reader, self._rtt_task):
+            if task:
+                task.cancel()
+        await asyncio.gather(*(t for t in (self._reader, self._rtt_task) if t),
+                             return_exceptions=True)
         await self._shut_session()
 
         self.usage.set_audio_minutes(self._audio_in_ms / 60000.0,

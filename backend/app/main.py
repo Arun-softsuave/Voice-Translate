@@ -15,7 +15,7 @@ from app.logging_config import configure_logging
 from app.websocket.media_stream import media_stream_endpoint
 
 settings = get_settings()
-configure_logging(settings.log_level)
+log_path = configure_logging(settings.log_level, settings.log_file)
 log = logging.getLogger(__name__)
 
 app = FastAPI(
@@ -67,6 +67,7 @@ async def startup() -> None:
             "echo_mode": settings.echo_mode,
             "media_stream_url": settings.media_stream_wss_url,
             "signature_validation": settings.validate_twilio_signature,
+            "log_file": str(log_path) if log_path else None,
             "translation_backend": settings.translation_backend,
             "translation_model": settings.translation_model,
             "translation_enabled": settings.translation_enabled,
