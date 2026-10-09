@@ -69,6 +69,7 @@ class Turn:
     heard: float | None = None
     out_first: float | None = None
     out_last: float | None = None
+    first_chunk_s: float = 0.0      # length of the first speech chunk
     play_first: float | None = None
     # (ack time - send time) of the latest acknowledged mark: Twilio's delay
     # at that point, used to project when the very last chunk was played.
@@ -138,8 +139,13 @@ class LatencyTracker:
         if turn is not None and turn.heard is None:
             turn.heard = t
 
-    def audio_out(self, t: float, is_speech: bool) -> str | None:
-        """Record one translated chunk. Returns a mark name to send after it."""
+    def audio_out(self, t: float, is_speech: bool, duration_s: float = 0.0) -> str | None:
+        """Record one translated chunk. Returns a mark name to send after it.
+
+        `duration_s` is how long the chunk plays. Twilio echoes a mark once the
+        audio before it has *finished*, so the first chunk's length is taken
+        off to get when the translation *started* playing.
+        """
         if not is_speech:
             return None
         turn = self._turn_for(t)
@@ -148,6 +154,7 @@ class LatencyTracker:
             return None
         if turn.out_first is None:
             turn.out_first = t
+            turn.first_chunk_s = duration_s
         turn.out_last = t
         if turn.last_mark_at is not None and t - turn.last_mark_at < MARK_EVERY_S:
             return None
@@ -168,7 +175,8 @@ class LatencyTracker:
             return
         sent = turn.marks.pop(name)
         if name.endswith(":1"):
-            turn.play_first = t
+            # The echo comes when the first chunk has finished playing.
+            turn.play_first = t - turn.first_chunk_s
         turn.play_delay = t - sent
 
     def playback_cleared(self, dropped_ms: float) -> None:

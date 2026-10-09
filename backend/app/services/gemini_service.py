@@ -19,6 +19,15 @@ The contract, from ai.google.dev/gemini-api/docs/live-api/live-translate:
    session is opened with the same configuration. A translator needs no
    memory of earlier sentences, so nothing is lost but the audio in flight.
 
+Each person's chosen language is sent as a transcription hint (`language_codes`):
+the speaker's on the "what was said" side, the listener's on the translation side.
+Without it Gemini guesses from 8 kHz phone audio, and on a real call it wrote a
+Tamil speaker's words out in Vietnamese. The model has no source-language
+setting for the translation itself; the hint is what it does accept. Verified
+live: the server accepts it for gemini-3.5-live-translate. If a server ever
+refuses it, the session reconnects once without hints rather than lose the
+call's translation.
+
 `echo_target_language` is left off: if someone speaks the listener's language
 already, the model stays silent rather than repeating it.
 
@@ -74,6 +83,19 @@ def client_for(api_key: str) -> genai.Client:
     return genai.Client(api_key=api_key)
 
 
+def _hint(code: str | None) -> str | None:
+    """A language we know, in Gemini's BCP-47 form; None for "auto" or unknown."""
+    if not code or code not in languages.ALL:
+        return None
+    return languages.gemini_code(code)
+
+
+def _transcription(code: str | None) -> types.AudioTranscriptionConfig:
+    if code is None:
+        return types.AudioTranscriptionConfig()
+    return types.AudioTranscriptionConfig(language_codes=[code])
+
+
 class _GoAway(Exception):
     """The server asked us to move to a new session."""
 
@@ -119,6 +141,9 @@ class GeminiTranslateSession:
         self.first_audio_ms: float | None = None
         self.responses = 0
         self.reconnects = 0
+        # Send the chosen languages as transcription hints; turned off for the
+        # rest of the session if the server refuses them.
+        self._hints = True
         self.rtt_ms: int | None = None   # network round trip to Google
         self._rtt_task: asyncio.Task | None = None
 
@@ -127,11 +152,20 @@ class GeminiTranslateSession:
         self._audio_out_ms = 0.0
 
     # --- lifecycle --------------------------------------------------------
+    @property
+    def source_hint(self) -> str | None:
+        """Gemini's code for the speaker's language, if we know it."""
+        return _hint(self.source_language) if self._hints else None
+
+    @property
+    def target_hint(self) -> str | None:
+        return _hint(self.target_language) if self._hints else None
+
     def _config(self) -> types.LiveConnectConfig:
         return types.LiveConnectConfig(
             response_modalities=[types.Modality.AUDIO],
-            input_audio_transcription=types.AudioTranscriptionConfig(),
-            output_audio_transcription=types.AudioTranscriptionConfig(),
+            input_audio_transcription=_transcription(self.source_hint),
+            output_audio_transcription=_transcription(self.target_hint),
             translation_config=types.TranslationConfig(
                 target_language_code=languages.gemini_code(self.target_language),
                 echo_target_language=False,
@@ -140,7 +174,18 @@ class GeminiTranslateSession:
 
     async def connect(self) -> None:
         self._client = await asyncio.to_thread(client_for, self._settings.gemini_api_key)
-        await self._open()
+        try:
+            await self._open()
+        except Exception as exc:  # noqa: BLE001
+            if not (self._hints and (self.source_hint or self.target_hint)):
+                raise
+            # Never lose a call's translation over a hint: drop it and retry.
+            log.warning("gemini_language_hint_rejected",
+                        extra={"label": self.label, "source_hint": self.source_hint,
+                               "target_hint": self.target_hint,
+                               "reason": type(exc).__name__, "detail": str(exc)[:200]})
+            self._hints = False
+            await self._open()
         self._reader = asyncio.create_task(self._read_loop())
         ws = getattr(self._session, "_ws", None)
         if ws is not None:
@@ -149,7 +194,8 @@ class GeminiTranslateSession:
             "gemini_connected",
             extra={"label": self.label,
                    "model": self._settings.gemini_translate_model,
-                   "direction": f"{self.source_language}->{self.target_language}"},
+                   "direction": f"{self.source_language}->{self.target_language}",
+                   "source_hint": self.source_hint, "target_hint": self.target_hint},
         )
 
     async def _measure_rtt(self, ws) -> None:

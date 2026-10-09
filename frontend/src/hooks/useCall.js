@@ -31,6 +31,8 @@ export function useCall() {
   const stateRef = useRef(state)
   stateRef.current = state
   const backendStatus = useRef(null)
+  // Bumped by reset(), so a start() still in flight knows it was abandoned.
+  const attempt = useRef(0)
 
   const fail = useCallback((message) => {
     setError(message)
@@ -100,14 +102,25 @@ export function useCall() {
       setMuted(false)
       backendStatus.current = null
       setState(State.CONNECTING)
+      const mine = attempt.current
+      const abandoned = () => attempt.current !== mine
 
       try {
         await VoiceConnection.requestMicrophone()
 
+        if (abandoned()) return
         const created = await api.start({ sourceLanguage, targetLanguage, phoneNumber })
+        if (abandoned()) {
+          api.end(created.session_id).catch(() => {})
+          return
+        }
         setSessionId(created.session_id)
 
         const { token } = await api.token()
+        if (abandoned()) {
+          api.end(created.session_id).catch(() => {})
+          return
+        }
 
         const connection = new VoiceConnection({
           // Our own line is up. Whether the other person answered is the
@@ -132,6 +145,7 @@ export function useCall() {
         // `session_id` reaches the TwiML webhook as a POST parameter.
         await connection.connect(token, { session_id: created.session_id })
       } catch (err) {
+        if (abandoned()) return
         fail(err instanceof ApiError ? err.message : err.message || 'Could not start the call.')
       }
     },
@@ -161,6 +175,7 @@ export function useCall() {
   }, [])
 
   const reset = useCallback(() => {
+    attempt.current += 1
     voice.current?.disconnect()
     voice.current = null
     backendStatus.current = null
@@ -172,6 +187,14 @@ export function useCall() {
     setSeconds(0)
     setLevels({ input: 0, output: 0 })
   }, [])
+
+  /** Leave the call screen at once: end the call if it is still on, then reset. */
+  const leave = useCallback(() => {
+    if (sessionId && isLive(stateRef.current)) {
+      api.end(sessionId).catch(() => { /* the backend may have ended it already */ })
+    }
+    reset()
+  }, [sessionId, reset])
 
   useEffect(() => () => voice.current?.disconnect(), [])
 
@@ -188,6 +211,7 @@ export function useCall() {
     hangUp,
     toggleMute,
     reset,
+    leave,
     dismissError: () => setError(null),
   }
 }

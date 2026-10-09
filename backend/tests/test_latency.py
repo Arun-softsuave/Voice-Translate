@@ -386,3 +386,14 @@ def test_latency_lines_hold_only_numbers(caplog):
             if key in allowed_text:
                 continue
             assert value is None or isinstance(value, (int, float, bool)), (key, value)
+
+
+def test_playback_start_excludes_the_first_chunks_own_length():
+    """Twilio echoes the mark when the chunk has FINISHED playing."""
+    tr = LatencyTracker("A")
+    speak(tr, 0.0, 2.0)
+    mark = tr.audio_out(3.0, is_speech=True, duration_s=0.24)
+    tr.played(mark, 3.0 + 0.30 + 0.24)        # network + the chunk playing
+    (rec,) = tr.flush(20.0)
+    assert rec["twilio_ms"] == 300            # not 540
+    assert rec["start_lag_ms"] == 3300

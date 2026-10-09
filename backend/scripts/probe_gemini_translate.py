@@ -8,6 +8,12 @@ SAME `GeminiTranslateSession` a live call uses. What comes back is again
     python scripts/probe_gemini_translate.py                      # Hindi -> Tamil
     python scripts/probe_gemini_translate.py --wav translate_probe_ta.wav --to hi
     python scripts/probe_gemini_translate.py --to te              # Hindi -> Telugu
+    python scripts/probe_gemini_translate.py --wav translate_probe_ta.wav --from ta --to en --no-hint
+
+The speaker's language (--from) and the target (--to) are sent to Gemini as
+transcription hints, exactly as the app does; --no-hint leaves Gemini to guess,
+for comparison. Both the "heard" transcript and the translation are checked for
+the right script, which is how a Tamil speaker transcribed as Vietnamese shows up.
 
 Needs GEMINI_API_KEY in backend/.env. The transcript answers "is it the right
 language?" without anyone listening; the WAV lets you judge quality. Writes
@@ -48,6 +54,10 @@ SCRIPTS = {
     "gu": ("Gujarati", "઀", "૿"),
     "pa": ("Gurmukhi", "਀", "੿"),
 }
+# Latin-script languages: basic + extended Latin, including Vietnamese letters.
+LATIN = ((0x41, 0x24F), (0x1E00, 0x1EFF))
+for _code in ("en", "es", "fr", "de", "it", "pt", "id", "vi"):
+    SCRIPTS[_code] = ("Latin", None, None)
 
 
 def read_wav_as_phone_audio(path: Path) -> bytes:
@@ -70,14 +80,30 @@ def write_ulaw_as_wav(path: Path, ulaw: bytes) -> None:
 
 
 def in_script(text: str, code: str) -> float:
-    """Share of letters in the target's script (0..1)."""
+    """Share of letters in that language's script (0..1); -1 if unknown."""
     if code not in SCRIPTS:
         return -1.0
     _, lo, hi = SCRIPTS[code]
     letters = [c for c in text if c.isalpha()]
     if not letters:
         return 0.0
-    return sum(lo <= c <= hi for c in letters) / len(letters)
+    if lo is None:                                   # Latin
+        ok = lambda c: any(a <= ord(c) <= b for a, b in LATIN)
+    else:
+        ok = lambda c: lo <= c <= hi
+    return sum(ok(c) for c in letters) / len(letters)
+
+
+def script_verdict(label: str, text: str, code: str) -> bool:
+    share = in_script(text, code)
+    if share < 0:
+        print(f"    {label}: no script check for {code!r}")
+        return True
+    name = SCRIPTS[code][0]
+    good = share >= 0.8
+    print(f"    {'PASS' if good else 'FAIL'}  {label} is {share:.0%} {name} script"
+          + ("" if good else " (wrong language detected)"))
+    return good
 
 
 async def run(args) -> int:
@@ -99,7 +125,8 @@ async def run(args) -> int:
                        "gemini-3.5-live-translate-preview")
 
     ulaw_in = read_wav_as_phone_audio(BACKEND / args.wav)
-    print(f"\n  PROBE  {settings.gemini_translate_model}  ->  {args.to}")
+    print(f"\n  PROBE  {settings.gemini_translate_model}  {args.source} -> {args.to}"
+          f"   hints {'off' if args.no_hint else 'on'}")
     print(f"  input  {args.wav}: {resample.ulaw_ms(ulaw_in) / 1000:.1f}s, "
           f"sent as µ-law 8 kHz in {FRAME_MS} ms frames, real time\n")
 
@@ -118,9 +145,11 @@ async def run(args) -> int:
         (heard if direction == "in" else spoke).append(text)
 
     session = GeminiTranslateSession(
-        settings, source_language="auto", target_language=args.to,
+        settings, source_language=args.source, target_language=args.to,
         on_audio=on_audio, on_transcript=on_transcript, label="probe",
     )
+    if args.no_hint:
+        session._hints = False
 
     t0 = time.monotonic()
     try:
@@ -173,6 +202,7 @@ async def run(args) -> int:
                   "after speech ended")
     print(f"    model-reported      first_audio_ms={session.first_audio_ms}, "
           f"reconnects={session.reconnects}")
+    print(f"    language hints      source={session.source_hint} target={session.target_hint}")
     print(f"    heard  (source)     {heard_text[:200]!r}")
     print(f"    spoke  (target)     {spoke_text[:200]!r}")
     print(f"    cost at paid rates  ${session.usage.usd:.4f}")
@@ -183,17 +213,10 @@ async def run(args) -> int:
     if not out and not spoke_text:
         print(f"    NO OUTPUT. {args.to!r} did not produce any translation.\n")
         return 1
-    share = in_script(spoke_text, args.to)
-    if share < 0:
-        print(f"    Audio returned. No script check for {args.to!r}; listen to the WAV.\n")
-        return 0
-    name = SCRIPTS[args.to][0]
-    if share >= 0.8:
-        print(f"    PASS  output transcript is {share:.0%} {name} script.\n")
-        return 0
-    print(f"    FAIL  output transcript is only {share:.0%} {name} script — "
-          "it may have answered in the wrong language.\n")
-    return 1
+    ok_heard = script_verdict("heard transcript", heard_text, args.source)
+    ok_spoke = script_verdict("translation", spoke_text, args.to)
+    print()
+    return 0 if ok_heard and ok_spoke else 1
 
 
 def main() -> int:
@@ -207,7 +230,11 @@ def main() -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--wav", default="translate_probe_hi.wav",
                     help="24 kHz mono PCM16 speech, relative to backend/")
+    ap.add_argument("--from", dest="source", default="hi",
+                    help="the speaker's language code (default hi, matching the default WAV)")
     ap.add_argument("--to", default="ta", help="target language code")
+    ap.add_argument("--no-hint", action="store_true",
+                    help="don't tell Gemini the languages (compare with the default)")
     ap.add_argument("--model", default=None, help="override the model id")
     return asyncio.run(run(ap.parse_args()))
 

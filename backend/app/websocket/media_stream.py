@@ -35,13 +35,21 @@ from app.services.session_service import registry
 from app.services.translate_service import TranslateSession
 from app.services.translator import Translator
 from app.utils.audio import b64_decode
-from app.utils.vad import SpeechDetector, frame_rms
+from app.utils.vad import BargeInDetector, SpeechDetector, frame_rms
 from app.websocket import twilio_protocol as proto
 
 log = logging.getLogger(__name__)
 
 MARK_EVERY_FRAMES = 25          # ~500 ms at 20 ms/frame
 FRAME_S = 0.02                  # one Twilio media frame
+
+# Model filler (near-silent audio) is not queued at Twilio once this much
+# audio is already waiting there: queued silence makes the next real speech
+# wait behind it (~0.35 s per sentence on demo calls).
+SILENCE_BACKLOG_S = 0.15
+# ...except a pause this soon after translated speech, which is part of the
+# speech (a gap between phrases) and must keep its length.
+PAUSE_KEEP_S = 0.6
 
 
 async def media_stream_endpoint(ws: WebSocket) -> None:
@@ -60,6 +68,9 @@ async def media_stream_endpoint(ws: WebSocket) -> None:
     # detecting interruption ourselves is the only way both backends can behave
     # the same (design doc §8.2).
     speech = SpeechDetector()
+    # Decides when talking over a translation should cut it: much slower to
+    # fire than `speech`, and deaf to the translation's own echo.
+    barge = BargeInDetector()
 
     try:
         while True:
@@ -139,23 +150,30 @@ async def media_stream_endpoint(ws: WebSocket) -> None:
 
                 tracker = session.latency[pid]
 
-                # This speaker starting up interrupts whatever they were being
-                # played, so drop it rather than talking over them.
+                level = frame_rms(b64_decode(payload))
+
+                # When this person starts and stops talking (latency timing).
                 was_speaking = speech.speaking
-                if speech.feed(b64_decode(payload)):
-                    log.debug("barge_in",
-                              extra={"session_id": session.session_id,
-                                     "participant": pid.value})
+                if speech.feed_level(level):
                     # The detector decides a few frames in; date the start back.
                     tracker.speech_started(now - speech.onset_frames * FRAME_S)
+                elif was_speaking and not speech.speaking:
+                    tracker.speech_stopped(now - speech.hangover_frames * FRAME_S)
+
+                # Talking over the translation they are hearing cuts it, but
+                # only on sustained, clearly direct speech: not a cough, line
+                # noise, or the translation's own echo in their microphone.
+                playing = session_service.playback_backlog_s(participant, now) > 0
+                if barge.feed(level, playing=playing):
+                    log.debug("barge_in",
+                              extra={"session_id": session.session_id,
+                                     "participant": pid.value, "playing": playing})
                     dropped = await session_service.clear_playback(session, pid)
                     if dropped:
                         # Whose translation was cut: the peer's, or our own in
                         # echo mode.
                         source = pid if settings.echo_mode else pid.peer
                         session.latency[source].playback_cleared(dropped)
-                elif was_speaking and not speech.speaking:
-                    tracker.speech_stopped(now - speech.hangover_frames * FRAME_S)
 
                 for record in tracker.finalize_due(now):
                     _log_turn(session, pid, record)
@@ -250,6 +268,9 @@ async def media_stream_endpoint(ws: WebSocket) -> None:
                     "frames_out": participant.frames_out,
                     "dropped_no_peer": participant.dropped_no_peer,
                     "frames_before_answer": frames_before_answer,
+                    "barge_ins": barge.fired,
+                    "barge_ins_ignored": barge.ignored,
+                    "silence_skipped_ms": round(participant.silence_skipped_ms),
                     "audio_s_in": round(participant.frames_in * 20 / 1000, 1),
                 },
             )
@@ -295,14 +316,25 @@ async def _open_translator(settings, session, pid: ParticipantId):
     listener = pid if settings.echo_mode else pid.peer
 
     async def deliver(audio_b64: str) -> None:
+        raw = b64_decode(audio_b64)
+        is_speech = frame_rms(raw) > SPEECH_RMS
+        now = time.monotonic()
+        hearer = session.participant(listener)
+
+        if is_speech:
+            hearer.last_speech_out_at = now
+        elif _skip_filler(hearer, now):
+            # Near-silent filler with audio already queued: queueing it would
+            # only make the next real speech wait behind it.
+            hearer.silence_skipped_ms += len(raw) / 8
+            return
+
         await session_service.route_audio(
             session, pid, audio_b64, echo_mode=settings.echo_mode
         )
-        # Latency: when translated *speech* (not the near-silent filler the
-        # model also sends) reaches us, plus a mark so Twilio tells us when it
-        # has actually been played.
-        is_speech = frame_rms(b64_decode(audio_b64)) > SPEECH_RMS
-        mark = tracker.audio_out(time.monotonic(), is_speech)
+        # Latency: when translated *speech* reaches us, plus a mark so Twilio
+        # tells us when it has actually been played.
+        mark = tracker.audio_out(now, is_speech, duration_s=len(raw) / 8000)
         if mark is not None:
             await session_service.send_mark(session, listener, mark)
 
@@ -389,6 +421,19 @@ async def _adopt_or_open_translator(settings, session, pid: ParticipantId):
                "stream_to_ready_ms": waited},
     )
     return translator
+
+
+def _skip_filler(hearer, now: float) -> bool:
+    """Should this near-silent chunk be left out of Twilio's queue?
+
+    Only when audio is already waiting there (so nothing goes quiet), and not
+    right after translated speech, where silence is a pause inside the speech
+    and dropping it would make phrases run together.
+    """
+    if session_service.playback_backlog_s(hearer, now) <= SILENCE_BACKLOG_S:
+        return False
+    recent = hearer.last_speech_out_at
+    return recent is None or now - recent > PAUSE_KEEP_S
 
 
 # --- latency logging ----------------------------------------------------------

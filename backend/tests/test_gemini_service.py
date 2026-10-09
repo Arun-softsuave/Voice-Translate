@@ -169,15 +169,109 @@ async def test_setup_names_the_model_and_the_target_language(wires):
 
 
 @pytest.mark.asyncio
-async def test_there_is_no_source_language_or_prompt_in_setup(wires):
-    """Gemini detects the source; a prompt would turn it into a chatbot."""
+async def test_the_source_language_is_only_a_transcription_hint(wires):
+    """The translate model has no source setting, and a prompt would turn it
+    into a chatbot: the speaker's language goes only to the transcript side."""
     session, _, _ = await build(source="hi", target="ta")
 
-    raw = json.dumps(wires[0].setup)
-    assert "systemInstruction" not in raw
-    assert '"hi"' not in raw
+    setup = wires[0].setup
+    assert "systemInstruction" not in json.dumps(setup)
+    assert "hi" not in json.dumps(setup["generationConfig"])
+    assert setup["inputAudioTranscription"]["language_codes"] == ["hi"]
 
     await session.close()
+
+
+# ------------------------------------------------------------ language hints
+@pytest.mark.asyncio
+async def test_each_side_is_told_its_language(wires):
+    """The bug: a Tamil speaker's captions came back in Vietnamese."""
+    session, _, _ = await build(source="ta", target="en")
+
+    setup = wires[0].setup
+    assert setup["inputAudioTranscription"]["language_codes"] == ["ta"]     # what was said
+    assert setup["outputAudioTranscription"]["language_codes"] == ["en"]    # the translation
+    assert setup["generationConfig"]["translationConfig"]["targetLanguageCode"] == "en"
+    assert session.source_hint == "ta" and session.target_hint == "en"
+
+    await session.close()
+
+
+@pytest.mark.asyncio
+async def test_hints_use_googles_codes(wires):
+    session, _, _ = await build(source="zh", target="pt")
+
+    setup = wires[0].setup
+    assert setup["inputAudioTranscription"]["language_codes"] == ["zh-Hans"]
+    assert setup["outputAudioTranscription"]["language_codes"] == ["pt-BR"]
+
+    await session.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["auto", "xx", ""])
+async def test_an_unknown_source_sends_no_hint(wires, source):
+    """Probe runs pass "auto": keep Gemini's own detection there."""
+    session, _, _ = await build(source=source, target="ta")
+
+    assert "language_codes" not in wires[0].setup.get("inputAudioTranscription", {})
+    assert wires[0].setup["outputAudioTranscription"]["language_codes"] == ["ta"]
+
+    await session.close()
+
+
+@pytest.mark.asyncio
+async def test_a_refused_hint_is_dropped_not_the_call(wires, caplog):
+    """If a server ever rejects the hints, retry once without them."""
+    import logging
+
+    caplog.set_level(logging.WARNING)
+    session = GeminiTranslateSession(
+        settings(), source_language="ta", target_language="en",
+        on_audio=lambda b: None, label="test/A")
+
+    # The first setup is refused, as a server rejecting the field would.
+    attempts = []
+    real_open = session._open
+
+    async def flaky_open():
+        attempts.append(session._hints)
+        if len(attempts) == 1:
+            raise RuntimeError("1007 invalid argument: language_codes")
+        await real_open()
+
+    session._open = flaky_open
+    await session.connect()
+
+    assert attempts == [True, False]
+    assert session.source_hint is None
+    assert "language_codes" not in wires[-1].setup.get("inputAudioTranscription", {})
+    assert any(r.getMessage() == "gemini_language_hint_rejected" for r in caplog.records)
+    await session.close()
+
+
+@pytest.mark.asyncio
+async def test_reconnects_keep_whatever_worked(wires):
+    session, _, _ = await build(source="ta", target="en")
+    session._hints = False                                # as if refused earlier
+    wires[0].push({"goAway": {"timeLeft": "5s"}})
+    await settle()
+
+    assert len(wires) == 2
+    assert "language_codes" not in wires[1].setup.get("inputAudioTranscription", {})
+    await session.close()
+
+
+@pytest.mark.asyncio
+async def test_a_failure_unrelated_to_hints_still_fails_the_connect(wires):
+    """Without hints there is nothing to drop; the error must surface."""
+    wires.refuse_from = 0
+    session = GeminiTranslateSession(
+        settings(), source_language="auto", target_language="xx",
+        on_audio=lambda b: None, label="test/A")
+    with pytest.raises(Exception):
+        await session.connect()
+    assert len(wires) == 1
 
 
 @pytest.mark.asyncio
@@ -305,12 +399,14 @@ async def test_latency_is_measured_from_first_heard_speech(wires):
     session, _, _ = await build()
 
     wires[0].push({"serverContent": {"inputTranscription": {"text": "hello"}}})
-    await asyncio.sleep(0.05)
+    # Wide margins: Windows' clock ticks only every ~15.6 ms, so a short sleep
+    # can measure noticeably low.
+    await asyncio.sleep(0.2)
     wires[0].push(model_audio(bytes(960)))
     await settle()
 
     assert session.first_audio_ms is not None
-    assert session.first_audio_ms >= 40
+    assert session.first_audio_ms >= 150
 
     await session.close()
 

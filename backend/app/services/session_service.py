@@ -221,9 +221,18 @@ async def route_audio(
         destination.ws, proto.build_media(destination.stream_sid, payload_b64)
     )
     if sent:
+        duration_ms = audio.duration_ms(audio.b64_decode(payload_b64))
         destination.frames_out += 1
-        destination.queued_ms += audio.duration_ms(audio.b64_decode(payload_b64))
+        destination.queued_ms += duration_ms
+        now = time.monotonic()
+        destination.playout_until = max(destination.playout_until, now) + duration_ms / 1000
     return sent
+
+
+def playback_backlog_s(participant, now: float | None = None) -> float:
+    """Seconds of audio queued at Twilio for this leg that have not played yet."""
+    now = time.monotonic() if now is None else now
+    return max(0.0, participant.playout_until - now)
 
 
 async def clear_playback(session: TranslationSession, target: ParticipantId) -> float:
@@ -237,6 +246,7 @@ async def clear_playback(session: TranslationSession, target: ParticipantId) -> 
     await proto.send(participant.ws, proto.build_clear(participant.stream_sid))
     dropped = participant.queued_ms - participant.played_ms
     participant.queued_ms = participant.played_ms
+    participant.playout_until = time.monotonic()
     log.info(
         "playback_cleared",
         extra={

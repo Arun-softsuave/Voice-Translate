@@ -44,6 +44,36 @@ export default function App() {
 
   const onSetupScreen = call.state === State.IDLE
 
+  // The app is one page that swaps screens, so without this the browser's
+  // Back button leaves the app altogether (often to an empty new tab). Entering
+  // the call screen adds a history entry; Back then returns to the setup
+  // screen, hanging up first if the call is still on.
+  const latestCall = useRef(call)
+  latestCall.current = call
+  const onCallEntry = useRef(false)
+
+  useEffect(() => {
+    if (!onSetupScreen && !onCallEntry.current) {
+      window.history.pushState({ screen: 'call' }, '')
+      onCallEntry.current = true
+    } else if (onSetupScreen && onCallEntry.current) {
+      // Left by "New call" rather than Back: drop the entry we added, so Back
+      // from the setup screen does not first land on a dead call screen.
+      onCallEntry.current = false
+      window.history.back()
+    }
+  }, [onSetupScreen])
+
+  useEffect(() => {
+    const onBack = () => {
+      if (!onCallEntry.current) return
+      onCallEntry.current = false
+      latestCall.current.leave()
+    }
+    window.addEventListener('popstate', onBack)
+    return () => window.removeEventListener('popstate', onBack)
+  }, [])
+
   // Until /health answers we know neither whether a phone number is required
   // nor which languages are offered, so we hold the screen rather than show
   // the wrong form and swap it.

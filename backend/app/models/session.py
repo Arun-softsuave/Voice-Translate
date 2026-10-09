@@ -52,6 +52,13 @@ class Participant:
     played_ms: float = 0.0              # advanced by Twilio `mark` acks
     queued_ms: float = 0.0              # audio handed to Twilio, not yet acked
 
+    # When the audio already handed to Twilio for this leg will have finished
+    # playing (monotonic seconds). Twilio plays in real time, so this is a
+    # precise model of its queue; chk- marks are only accurate to 500 ms.
+    playout_until: float = 0.0
+    last_speech_out_at: float | None = None  # last translated *speech* sent here
+    silence_skipped_ms: float = 0.0     # model filler we chose not to queue
+
     # Latency instrumentation (monotonic seconds; never what was said).
     answered_at: float | None = None    # Twilio: the phone was picked up
     twiml_at: float | None = None       # Twilio fetched our TwiML

@@ -81,12 +81,13 @@ def test_the_end_reason_reaches_the_browser(client, call, status, extra, reason)
     assert body["end_reason"] == reason
 
 
-def test_an_ended_call_is_forgotten_after_a_while(client, call, monkeypatch):
+def test_an_ended_call_is_forgotten_after_a_while(client, call):
     twilio_status(client, call, "no-answer")
     assert client.get(f"/api/call/{call.session_id}").status_code == 200
 
-    monkeypatch.setattr(session_service, "ENDED_TTL_S", 0.0)
-    time.sleep(0.01)
+    # Back-date the end rather than sleep: Windows' clock ticks every ~15.6 ms,
+    # so a short sleep can leave the call exactly at the cutoff, not past it.
+    call.ended_at -= session_service.ENDED_TTL_S + 1.0
     assert client.get(f"/api/call/{call.session_id}").status_code == 404
 
 
