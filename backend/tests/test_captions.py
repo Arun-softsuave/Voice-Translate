@@ -239,6 +239,16 @@ def test_removing_the_session_closes_its_captions():
 
 
 # --------------------------------------------------------------- SSE
+@pytest.fixture
+def owner():
+    """The signed-in user the direct route calls below act as."""
+    from app.auth.deps import CurrentUser
+    from tests.conftest import make_user
+
+    return CurrentUser(make_user("captions@example.com"), "Owner",
+                       "captions@example.com", "user")
+
+
 def parse(chunks: list[str]) -> list[tuple[str, object]]:
     events = []
     for chunk in "".join(chunks).split("\n\n"):
@@ -250,14 +260,14 @@ def parse(chunks: list[str]) -> list[tuple[str, object]]:
 
 
 @pytest.mark.asyncio
-async def test_stream_sends_snapshot_then_live_lines_then_end():
-    s = registry.create(source_language="en", target_language="es")
+async def test_stream_sends_snapshot_then_live_lines_then_end(owner):
+    s = registry.create(source_language="en", target_language="es", user_id=owner.id)
     try:
         s.captions.add(A, HEARD, "Hello")
         s.captions.add(B, SPOKE, "Hi, who is this?")
         s.captions.add(B, HEARD, "Hola, ¿quién es?")          # not for A
 
-        response = await call_routes.captions(s.session_id, "A", get_settings())
+        response = await call_routes.captions(s.session_id, "A", get_settings(), owner)
         assert response.media_type == "text/event-stream"
         assert response.headers["cache-control"] == "no-cache"
 
@@ -284,10 +294,10 @@ async def test_stream_sends_snapshot_then_live_lines_then_end():
 
 
 @pytest.mark.asyncio
-async def test_lines_for_the_other_viewer_are_not_streamed():
-    s = registry.create(source_language="en", target_language="es")
+async def test_lines_for_the_other_viewer_are_not_streamed(owner):
+    s = registry.create(source_language="en", target_language="es", user_id=owner.id)
     try:
-        response = await call_routes.captions(s.session_id, "A", get_settings())
+        response = await call_routes.captions(s.session_id, "A", get_settings(), owner)
         body = response.body_iterator
         await body.__anext__()                               # empty snapshot
 
@@ -303,11 +313,11 @@ async def test_lines_for_the_other_viewer_are_not_streamed():
 
 
 @pytest.mark.asyncio
-async def test_idle_stream_sends_keepalive_pings(monkeypatch):
+async def test_idle_stream_sends_keepalive_pings(monkeypatch, owner):
     monkeypatch.setattr(call_routes, "CAPTION_PING_S", 0.01)
-    s = registry.create(source_language="en", target_language="es")
+    s = registry.create(source_language="en", target_language="es", user_id=owner.id)
     try:
-        response = await call_routes.captions(s.session_id, "A", get_settings())
+        response = await call_routes.captions(s.session_id, "A", get_settings(), owner)
         body = response.body_iterator
         await body.__anext__()
         assert await body.__anext__() == ": ping\n\n"
@@ -315,34 +325,31 @@ async def test_idle_stream_sends_keepalive_pings(monkeypatch):
         registry.remove(s.session_id)
 
 
-def test_http_unknown_session_is_404():
-    from app.main import app
-
-    with TestClient(app) as client:
+def test_http_unknown_session_is_404(signed_in):
+    client, _ = signed_in
+    with client:
         r = client.get("/api/call/sess_nope/captions")
     assert r.status_code == 404
 
 
-def test_http_bad_viewer_is_rejected():
-    from app.main import app
-
-    s = registry.create(source_language="en", target_language="es")
+def test_http_bad_viewer_is_rejected(signed_in):
+    client, user_id = signed_in
+    s = registry.create(source_language="en", target_language="es", user_id=user_id)
     try:
-        with TestClient(app) as client:
+        with client:
             r = client.get(f"/api/call/{s.session_id}/captions?viewer=C")
         assert r.status_code == 422
     finally:
         registry.remove(s.session_id)
 
 
-def test_http_stream_of_a_finished_call_ends_cleanly():
+def test_http_stream_of_a_finished_call_ends_cleanly(signed_in):
     """Over real HTTP: correct content type, a snapshot, then `end`."""
-    from app.main import app
-
-    s = registry.create(source_language="en", target_language="es")
+    client, user_id = signed_in
+    s = registry.create(source_language="en", target_language="es", user_id=user_id)
     s.captions.close()
     try:
-        with TestClient(app) as client:
+        with client:
             r = client.get(f"/api/call/{s.session_id}/captions")
         assert r.status_code == 200
         assert r.headers["content-type"].startswith("text/event-stream")
@@ -353,7 +360,7 @@ def test_http_stream_of_a_finished_call_ends_cleanly():
 
 # ------------------------------------------------------------ privacy
 @pytest.mark.asyncio
-async def test_caption_text_never_reaches_the_logs(caplog, monkeypatch):
+async def test_caption_text_never_reaches_the_logs(caplog, monkeypatch, owner):
     """Drive a Gemini session end to end with transcripts, and the caption
     stream, at DEBUG level; no spoken word may appear in any log record."""
     from google.genai import live as sdk_live
@@ -373,7 +380,7 @@ async def test_caption_text_never_reaches_the_logs(caplog, monkeypatch):
 
     settings = replace(get_settings(), translation_backend="gemini",
                        gemini_api_key="g-test")
-    s = registry.create(source_language="en", target_language="es")
+    s = registry.create(source_language="en", target_language="es", user_id=owner.id)
     try:
         translator = await media_stream._open_translator(settings, s, A)
         wires[0].push({"serverContent": {"inputTranscription": {"text": "MYSECRETPIN 4821"}}})
@@ -382,7 +389,7 @@ async def test_caption_text_never_reaches_the_logs(caplog, monkeypatch):
 
         assert [l.text for l in s.captions.lines()] == ["MYSECRETPIN 4821", "MIPINSECRETO 4821"]
 
-        response = await call_routes.captions(s.session_id, "A", settings)
+        response = await call_routes.captions(s.session_id, "A", settings, owner)
         await response.body_iterator.__anext__()
         await translator.close()
     finally:

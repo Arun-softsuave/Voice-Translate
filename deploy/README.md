@@ -45,10 +45,31 @@ Open https://voice.softsuaveai.space from any computer.
 Unchanged: backend on :8000, `npm run dev` on :5173. With `BACKEND_PUBLIC_URL`
 pointing at the tunnel, Twilio still needs the tunnel running to reach you.
 
+## Accounts
+
+Nobody can place a call without signing in. People ask for access on the
+sign-in page; an admin approves them under **Admin → Requests**. Members see
+their own call history; admins see every member and every call.
+
+One-time, on the host:
+
+1. `backend/.env`: `ADMIN_EMAIL=<owner email>` (see `backend/.env.example`).
+2. Set the owner's password. It is typed at a hidden prompt, never in a page:
+   ```
+   cd backend
+   ..\.venv\Scripts\python.exe -m app.cli set-password <owner email>
+   ```
+   The same command resets anyone's forgotten password and signs them out.
+
+Everything is kept in one SQLite file, `backend/data/app.db` (created on first
+start, never committed). Back it up by copying it. Moving to another computer:
+copy `backend/.env` **and** `backend/data/app.db` along with the tunnel
+credentials.
+
 ## Before sharing the link
 
-The app has no login, and every call is billed to the Twilio and Gemini
-accounts. Put Cloudflare Access (Zero Trust → Access → Applications →
-Self-hosted) on `voice.softsuaveai.space`, allowing only your team's emails,
-with a Bypass policy for the paths Twilio calls: `/api/call/twiml/*`,
-`/api/call/status` and `/ws/media-stream`.
+Sign-in keeps strangers from placing calls. Cloudflare Access (Zero Trust →
+Access → Applications → Self-hosted) on `voice.softsuaveai.space` is still a
+good outer lock: allow only your team's emails, with a Bypass policy for the
+paths Twilio calls: `/api/call/twiml/*`, `/api/call/status` and
+`/ws/media-stream`.

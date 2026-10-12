@@ -17,3 +17,6 @@ backend/gemini_probe_*.wav
 
 # Backend log files (rotated copies end in .1, .2, ...)
 backend/logs/
+
+# Accounts and call history (SQLite); copy it with .env when moving hosts
+backend/data/

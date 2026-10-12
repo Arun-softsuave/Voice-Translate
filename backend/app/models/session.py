@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
@@ -87,6 +88,13 @@ class TranslationSession:
     # Translators opened while Twilio was still connecting a leg's stream,
     # keyed by participant. The stream handler adopts them.
     translator_tasks: dict = field(default_factory=dict, repr=False)
+    # The signed-in user who placed the call, and its row in the call history.
+    # None for sessions made outside a request (tests, probes): never saved.
+    user_id: int | None = None
+    call_id: int | None = None
+    # Wall-clock twin of created_at, for the history's timestamps.
+    started_wall: datetime = field(
+        default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
     # Never part of snapshot(): captions are what people said.
     captions: CaptionLog = field(default_factory=CaptionLog, repr=False)
     # One per speaker: the timings of that person's sentences being translated.

@@ -23,6 +23,7 @@ from app.models.session import (
     ParticipantId,
     TranslationSession,
 )
+from app.services import history
 from app.utils import audio
 from app.websocket import twilio_protocol as proto
 
@@ -53,6 +54,7 @@ class SessionRegistry:
         target_language: str,
         participant_b_kind: str = "pstn",
         phone_number: str | None = None,
+        user_id: int | None = None,
     ) -> TranslationSession:
         session_id = "sess_" + secrets.token_urlsafe(16)
         session = TranslationSession(
@@ -68,7 +70,12 @@ class SessionRegistry:
                 kind=participant_b_kind,
                 phone_number=phone_number,
             ),
+            user_id=user_id,
         )
+        # Calls placed by a signed-in user go into their history.
+        history.record_start(session)
+        if session.call_id is not None:
+            session.captions.on_final = history.line_sink(session)
         self._sessions[session_id] = session
         self._purge_ended()
         log.info(
@@ -87,6 +94,9 @@ class SessionRegistry:
 
     def all(self) -> Iterable[TranslationSession]:
         return list(self._sessions.values())
+
+    def sessions_for_user(self, user_id: int) -> list[TranslationSession]:
+        return [s for s in self._sessions.values() if s.user_id == user_id]
 
     def remove(self, session_id: str) -> None:
         session = self._sessions.pop(session_id, None)
@@ -107,7 +117,8 @@ class SessionRegistry:
         if session.end_reason is None:
             session.end_reason = reason
         session.ended_at = time.monotonic()
-        self.remove(session.session_id)
+        self.remove(session.session_id)     # also saves the last caption lines
+        history.record_end(session)
         self._ended[session.session_id] = session
         self._purge_ended()
 

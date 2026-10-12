@@ -26,7 +26,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 from app.config import get_settings
 from app.models.session import CallStatus, ParticipantId
-from app.services import session_service
+from app.services import history, session_service
 from app.services.captions import HEARD, SPOKE
 from app.services.gemini_service import GeminiTranslateSession
 from app.services.latency import MARK_PREFIX, SPEECH_RMS
@@ -255,6 +255,10 @@ async def media_stream_endpoint(ws: WebSocket) -> None:
     finally:
         if translator is not None:
             await translator.close()
+            if session is not None:
+                usd = getattr(getattr(translator, "usage", None), "usd", 0.0)
+                if isinstance(usd, (int, float)):
+                    history.add_model_cost(session, float(usd))
         if session and pid:
             _log_latency_summary(session, pid, translator)
             participant = session.participant(pid)

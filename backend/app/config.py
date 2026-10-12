@@ -107,6 +107,15 @@ class Settings:
     # every country; Twilio's Geo Permissions still decide what it will connect.
     allowed_destination_prefixes: tuple[str, ...] = field(default=())
 
+    # --- Accounts and history ---------------------------------------------
+    # The SQLite file holding users, sessions and call history. Relative paths
+    # are relative to the backend folder.
+    database_path: str = ""
+    # Off only for plain-http local testing; the tunnel is always https.
+    session_cookie_secure: bool = True
+    # The owner account: always an admin, and no one can demote or disable it.
+    admin_email: str = ""
+
     def allows_destination(self, number: str) -> bool:
         prefixes = self.allowed_destination_prefixes
         return not prefixes or number.startswith(prefixes)
@@ -175,6 +184,11 @@ def _destinations() -> tuple[str, ...]:
     return prefixes
 
 
+def _database_path() -> str:
+    path = Path(_opt("DATABASE_PATH", "data/app.db"))
+    return str(path if path.is_absolute() else BACKEND_DIR / path)
+
+
 @lru_cache
 def get_settings() -> Settings:
     return Settings(
@@ -200,4 +214,7 @@ def get_settings() -> Settings:
         ring_timeout_s=int(_opt("RING_TIMEOUT_S", "60") or 60),
         log_file=_log_file(),
         allowed_destination_prefixes=_destinations(),
+        database_path=_database_path(),
+        session_cookie_secure=_bool("SESSION_COOKIE_SECURE", True),
+        admin_email=_opt("ADMIN_EMAIL").lower(),
     )

@@ -7,7 +7,6 @@ country codes. Twilio's own Geo Permissions apply on top of either.
 from dataclasses import replace
 
 import pytest
-from fastapi.testclient import TestClient
 
 from app import config
 from app.api.routes import call as call_routes
@@ -41,7 +40,7 @@ def test_a_malformed_setting_refuses_to_start(monkeypatch):
 
 
 @pytest.fixture
-def placing(monkeypatch):
+def placing(signed_in, monkeypatch):
     """Start calls for real (not demo mode), with Twilio faked."""
     dialled = []
 
@@ -54,7 +53,7 @@ def placing(monkeypatch):
             return "CA" + "1" * 32
 
     monkeypatch.setattr(twilio_service, "TwilioClient", FakeTwilio)
-    client = TestClient(app)
+    client, _ = signed_in
 
     def place(number, prefixes=()):
         app.dependency_overrides[call_routes._settings] = lambda: replace(

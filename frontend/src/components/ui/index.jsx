@@ -1,8 +1,11 @@
 /* Shared primitives. Every visual value comes from tokens.css. */
 
-export function Button({ variant = 'ghost', active, children, ...rest }) {
+import { useEffect, useRef, useState } from 'react'
+
+export function Button({ variant = 'ghost', active, small, children, ...rest }) {
   const classes = ['btn', `btn--${variant}`]
   if (active) classes.push('btn--on')
+  if (small) classes.push('btn--small')
   return (
     <button className={classes.join(' ')} {...rest}>
       {children}
@@ -72,6 +75,49 @@ export function Toast({ tone = 'error', message, onClose }) {
       <button className="toast__close" onClick={onClose} aria-label="Dismiss">
         ×
       </button>
+    </div>
+  )
+}
+
+/** A password field with a show/hide switch, so long phrases can be checked. */
+export function PasswordInput({ invalid, ...rest }) {
+  const [shown, setShown] = useState(false)
+  return (
+    <span className="secret">
+      <Input type={shown ? 'text' : 'password'} invalid={invalid} {...rest} />
+      <button
+        type="button"
+        className="secret__toggle"
+        onClick={() => setShown((s) => !s)}
+        aria-label={shown ? 'Hide password' : 'Show password'}
+        aria-pressed={shown}
+      >
+        {shown ? 'Hide' : 'Show'}
+      </button>
+    </span>
+  )
+}
+
+/** An error or notice above a form. Focused when it appears, and announced. */
+export function Alert({ tone = 'error', children }) {
+  const ref = useRef(null)
+  useEffect(() => {
+    if (children) ref.current?.focus()
+  }, [children])
+  if (!children) return null
+  return (
+    <div ref={ref} className={`alert alert--${tone}`} role="alert" tabIndex={-1}>
+      {children}
+    </div>
+  )
+}
+
+/** What an empty list will hold, instead of a blank space. */
+export function Empty({ title, children }) {
+  return (
+    <div className="empty">
+      <p className="empty__title">{title}</p>
+      {children && <p className="empty__body">{children}</p>}
     </div>
   )
 }
