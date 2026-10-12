@@ -84,7 +84,7 @@ def validate_signature(
 # Twilio error codes worth explaining rather than showing as "call failed".
 # Safe to surface: these describe OUR configuration, not account internals.
 CALL_ERROR_HINTS: dict[int, str] = {
-    21215: "Calling India is not enabled on this Twilio account. "
+    21215: "Calling this country is not enabled on this Twilio account. "
            "Enable it in Console -> Voice -> Settings -> Geo Permissions.",
     21210: "The caller ID is not a number owned by this account.",
     21211: "That destination number is not valid.",

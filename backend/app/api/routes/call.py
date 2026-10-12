@@ -60,8 +60,8 @@ def start_call(body: StartCallRequest, settings: Settings = Depends(_settings)):
         if not body.phone_number:
             raise HTTPException(400, {"code": "PHONE_NUMBER_REQUIRED",
                                       "message": "A destination number is required."})
-        if not body.phone_number.startswith(settings.allowed_destination_prefixes):
-            # §13: a stray request must not be able to dial arbitrary countries.
+        if not settings.allows_destination(body.phone_number):
+            # §13: only the countries ALLOWED_DESTINATIONS names (default: all).
             raise HTTPException(422, {"code": "UNSUPPORTED_DESTINATION",
                                       "message": "This destination is not enabled."})
         if not settings.twilio_phone_number:
