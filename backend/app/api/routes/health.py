@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
+from app.auth.deps import require_admin
 from app.config import Settings, get_settings
 from app.services import languages
 from app.services.session_service import registry
@@ -33,7 +34,7 @@ def health(settings: Settings = Depends(_settings)):
     }
 
 
-@router.get("/api/diagnostics/sessions")
+@router.get("/api/diagnostics/sessions", dependencies=[Depends(require_admin)])
 def sessions(settings: Settings = Depends(_settings)):
     """Live session view. Contains no phone numbers, audio or credentials."""
     return {"sessions": [s.snapshot() for s in registry.all()]}

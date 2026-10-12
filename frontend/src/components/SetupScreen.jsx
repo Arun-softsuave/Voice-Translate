@@ -140,7 +140,7 @@ export function SetupScreen({ onStart, busy, demoMode, sources, targets }) {
               label="Mobile number"
               htmlFor="phone"
               error={phoneError}
-              hint="Include the country code, e.g. +91 87546 77067"
+              hint="Include the country code, e.g. +91 87546 77067 or +34 612345678"
             >
               <Input
                 id="phone"
@@ -164,7 +164,8 @@ export function SetupScreen({ onStart, busy, demoMode, sources, targets }) {
           </div>
 
           <p className="footnote">
-            Your microphone is used only for the duration of the call.
+            Your microphone is used only for the duration of the call. Calls are
+            transcribed and saved to your history.
           </p>
         </div>
       </div>

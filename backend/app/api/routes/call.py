@@ -10,6 +10,7 @@ import time
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 
+from app.auth.deps import CurrentUser, current_user, same_origin
 from app.config import Settings, get_settings
 from app.logging_config import mask_phone
 from app.models.session import CallStatus, ParticipantId
@@ -20,7 +21,7 @@ from app.schemas.call import (
     TokenRequest,
     TokenResponse,
 )
-from app.services import twilio_service
+from app.services import history, twilio_service
 from app.services.captions import view
 from app.services.session_service import registry
 from app.websocket.media_stream import prewarm_translator
@@ -41,16 +42,32 @@ def _settings() -> Settings:
     return get_settings()
 
 
-@router.post("/token", response_model=TokenResponse)
-def create_token(body: TokenRequest, settings: Settings = Depends(_settings)):
-    """Short-lived Twilio Access Token for the browser's Voice SDK."""
-    token = twilio_service.create_access_token(settings, body.identity, TOKEN_TTL)
-    log.info("token_issued", extra={"identity": body.identity})
-    return TokenResponse(token=token, identity=body.identity, expires_in=TOKEN_TTL)
+def _owned(session, user: CurrentUser):
+    """The session if `user` placed it. Anyone else's call is "not found"."""
+    if session is None or session.user_id != user.id:
+        raise HTTPException(404, {"code": "UNKNOWN_SESSION", "message": "No such call."})
+    return session
 
 
-@router.post("/start", response_model=StartCallResponse, status_code=201)
-def start_call(body: StartCallRequest, settings: Settings = Depends(_settings)):
+@router.post("/token", response_model=TokenResponse,
+             dependencies=[Depends(same_origin)])
+def create_token(body: TokenRequest | None = None,
+                 settings: Settings = Depends(_settings),
+                 user: CurrentUser = Depends(current_user)):
+    """Short-lived Twilio Access Token for the browser's Voice SDK.
+
+    The identity is the signed-in user's; whatever the body says is ignored.
+    """
+    identity = f"u_{user.id}"
+    token = twilio_service.create_access_token(settings, identity, TOKEN_TTL)
+    log.info("token_issued", extra={"identity": identity})
+    return TokenResponse(token=token, identity=identity, expires_in=TOKEN_TTL)
+
+
+@router.post("/start", response_model=StartCallResponse, status_code=201,
+             dependencies=[Depends(same_origin)])
+def start_call(body: StartCallRequest, settings: Settings = Depends(_settings),
+               user: CurrentUser = Depends(current_user)):
     """Create the session before any Twilio call exists.
 
     The session_id is minted here and travels into Twilio as a TwiML custom
@@ -60,8 +77,8 @@ def start_call(body: StartCallRequest, settings: Settings = Depends(_settings)):
         if not body.phone_number:
             raise HTTPException(400, {"code": "PHONE_NUMBER_REQUIRED",
                                       "message": "A destination number is required."})
-        if not body.phone_number.startswith(settings.allowed_destination_prefixes):
-            # §13: a stray request must not be able to dial arbitrary countries.
+        if not settings.allows_destination(body.phone_number):
+            # §13: only the countries ALLOWED_DESTINATIONS names (default: all).
             raise HTTPException(422, {"code": "UNSUPPORTED_DESTINATION",
                                       "message": "This destination is not enabled."})
         if not settings.twilio_phone_number:
@@ -73,6 +90,7 @@ def start_call(body: StartCallRequest, settings: Settings = Depends(_settings)):
         target_language=body.target_language,
         participant_b_kind="browser" if settings.demo_mode else "pstn",
         phone_number=body.phone_number,
+        user_id=user.id,
     )
 
     if not settings.demo_mode:
@@ -83,6 +101,7 @@ def start_call(body: StartCallRequest, settings: Settings = Depends(_settings)):
             )
         except twilio_service.CallOriginationError as exc:
             registry.remove(session.session_id)
+            history.record_failed(session, f"twilio_{exc.code}")
             log.warning("pstn_originate_failed",
                         extra={"to": mask_phone(body.phone_number),
                                "twilio_code": exc.code})
@@ -90,6 +109,7 @@ def start_call(body: StartCallRequest, settings: Settings = Depends(_settings)):
                                       "message": exc.message}) from exc
         except Exception as exc:  # noqa: BLE001
             registry.remove(session.session_id)
+            history.record_failed(session, "twilio_error")
             log.exception("pstn_originate_failed",
                           extra={"to": mask_phone(body.phone_number)})
             raise HTTPException(502, {"code": "TWILIO_ERROR",
@@ -188,15 +208,17 @@ async def status_callback(request: Request, settings: Settings = Depends(_settin
     return Response(status_code=204)
 
 
-@router.post("/end/{session_id}")
-async def end_call(session_id: str, settings: Settings = Depends(_settings)):
+@router.post("/end/{session_id}", dependencies=[Depends(same_origin)])
+async def end_call(session_id: str, settings: Settings = Depends(_settings),
+                   user: CurrentUser = Depends(current_user)):
     session = registry.get(session_id)
     if session is None:
         ended = registry.get_ended(session_id)
-        if ended is not None:                       # already over: say how
+        if ended is not None and ended.user_id == user.id:  # already over: say how
             return {"session_id": session_id, "status": ended.status.value,
                     "end_reason": ended.end_reason}
         raise HTTPException(404, {"code": "UNKNOWN_SESSION", "message": "No such call."})
+    _owned(session, user)
     # Hanging up before the other side picked up is a cancelled call.
     b = session.b
     answered = b.answered_at is not None or b.connected
@@ -207,16 +229,15 @@ async def end_call(session_id: str, settings: Settings = Depends(_settings)):
 
 @router.get("/{session_id}/captions")
 async def captions(session_id: str, viewer: str = "A",
-                   settings: Settings = Depends(_settings)):
+                   settings: Settings = Depends(_settings),
+                   user: CurrentUser = Depends(current_user)):
     """Live captions for one participant, as Server-Sent Events.
 
     Sends a `snapshot` of every line so far, then one `caption` event per
     update. Each event carries the line's full text, so the client replaces
     by id. Ends with an `end` event when the call does.
     """
-    session = registry.get(session_id)
-    if session is None:
-        raise HTTPException(404, {"code": "UNKNOWN_SESSION", "message": "No such call."})
+    session = _owned(registry.get(session_id), user)
     if viewer not in ("A", "B"):
         raise HTTPException(422, {"code": "UNKNOWN_PARTICIPANT", "message": "Unknown leg."})
 
@@ -254,11 +275,9 @@ async def captions(session_id: str, viewer: str = "A",
 
 
 @router.get("/{session_id}", response_model=SessionResponse)
-def get_session(session_id: str):
+def get_session(session_id: str, user: CurrentUser = Depends(current_user)):
     # Ended calls stay readable for a while so the browser can learn why.
-    session = registry.get(session_id) or registry.get_ended(session_id)
-    if session is None:
-        raise HTTPException(404, {"code": "UNKNOWN_SESSION", "message": "No such call."})
+    session = _owned(registry.get(session_id) or registry.get_ended(session_id), user)
     return SessionResponse(**session.snapshot())
 
 

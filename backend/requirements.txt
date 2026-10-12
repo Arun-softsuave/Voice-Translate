@@ -11,6 +11,11 @@ python-multipart==0.0.20
 numpy==2.4.6
 # Gemini Live API (TRANSLATION_BACKEND=gemini)
 google-genai==2.25.0
+# Accounts and call history: one SQLite file, schema managed by Alembic
+sqlalchemy==2.1.4
+alembic==1.20.0
+# Password hashing (argon2id)
+argon2-cffi==25.1.0
 
 # dev / test
 pytest==8.3.4

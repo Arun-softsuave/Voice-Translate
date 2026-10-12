@@ -201,7 +201,7 @@ of a cent per minute and with no Indian carrier involved. Switch to
 
 | Symptom | Cause |
 |---|---|
-| Twilio error **21215** | India not enabled in Geo Permissions |
+| Twilio error **21215** | That country is not enabled in Twilio Geo Permissions |
 | Call fails on a trial account | Destination number not verified |
 | Recipient hears a Twilio message first | Trial account greeting — upgrade to remove |
 | `trial accounts have limited parameter access` | Trial restricts `calls.create`. Upgrade |

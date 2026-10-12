@@ -27,15 +27,17 @@ FRAME = audio.b64_encode(audio.ulaw_silence(20))
 
 
 @pytest.fixture
-def client():
-    with TestClient(app) as c:
+def client(signed_in):
+    c, _ = signed_in
+    with c:
         yield c
 
 
 @pytest.fixture
-def call():
+def call(signed_in):
+    _, user_id = signed_in
     s = registry.create(source_language="en", target_language="ta",
-                        phone_number="+919876543210")
+                        phone_number="+919876543210", user_id=user_id)
     s.b.call_sid = "CA" + "b" * 32
     yield s
     registry.remove(s.session_id)

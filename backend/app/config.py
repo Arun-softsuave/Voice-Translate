@@ -103,7 +103,22 @@ class Settings:
     # relative to the backend folder, wherever uvicorn was started from.
     log_file: str = ""
 
-    allowed_destination_prefixes: tuple[str, ...] = field(default=("+91",))
+    # Country codes the PSTN leg may dial, e.g. ("+91", "+34"). Empty means
+    # every country; Twilio's Geo Permissions still decide what it will connect.
+    allowed_destination_prefixes: tuple[str, ...] = field(default=())
+
+    # --- Accounts and history ---------------------------------------------
+    # The SQLite file holding users, sessions and call history. Relative paths
+    # are relative to the backend folder.
+    database_path: str = ""
+    # Off only for plain-http local testing; the tunnel is always https.
+    session_cookie_secure: bool = True
+    # The owner account: always an admin, and no one can demote or disable it.
+    admin_email: str = ""
+
+    def allows_destination(self, number: str) -> bool:
+        prefixes = self.allowed_destination_prefixes
+        return not prefixes or number.startswith(prefixes)
 
     @property
     def use_translate_backend(self) -> bool:
@@ -155,6 +170,25 @@ def _log_file() -> str:
     return str(path if path.is_absolute() else BACKEND_DIR / path)
 
 
+def _destinations() -> tuple[str, ...]:
+    """ALLOWED_DESTINATIONS: "*" (the default) for anywhere, or a comma list
+    of country codes such as "+91,+34,+31"."""
+    raw = _opt("ALLOWED_DESTINATIONS", "*")
+    if raw in ("", "*"):
+        return ()
+    prefixes = tuple(p.strip() for p in raw.split(",") if p.strip())
+    for p in prefixes:
+        if not (p.startswith("+") and p[1:].isdigit()):
+            raise RuntimeError(
+                f"ALLOWED_DESTINATIONS must be * or country codes like +91,+34; got {p!r}.")
+    return prefixes
+
+
+def _database_path() -> str:
+    path = Path(_opt("DATABASE_PATH", "data/app.db"))
+    return str(path if path.is_absolute() else BACKEND_DIR / path)
+
+
 @lru_cache
 def get_settings() -> Settings:
     return Settings(
@@ -179,4 +213,8 @@ def get_settings() -> Settings:
         log_level=_opt("LOG_LEVEL", "INFO").upper(),
         ring_timeout_s=int(_opt("RING_TIMEOUT_S", "60") or 60),
         log_file=_log_file(),
+        allowed_destination_prefixes=_destinations(),
+        database_path=_database_path(),
+        session_cookie_secure=_bool("SESSION_COOKIE_SECURE", True),
+        admin_email=_opt("ADMIN_EMAIL").lower(),
     )

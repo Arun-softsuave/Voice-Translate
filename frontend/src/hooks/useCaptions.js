@@ -8,7 +8,7 @@ import { captionsReducer, initialCaptions, LIVE_MS } from '../lib/captions'
  *
  * Streams while the call is live, keeps the lines after hang-up so they can
  * still be read, and clears them when a new call starts (sessionId changes).
- * Nothing is stored anywhere; the lines live only in this component tree.
+ * The server also saves them to the caller's call history.
  */
 export function useCaptions(sessionId, active) {
   const [lines, dispatch] = useReducer(captionsReducer, initialCaptions)
@@ -21,7 +21,8 @@ export function useCaptions(sessionId, active) {
   useEffect(() => {
     if (!sessionId || !active) return undefined
 
-    const source = new EventSource(api.captionsUrl(sessionId))
+    // withCredentials: the stream is only for the signed-in caller.
+    const source = new EventSource(api.captionsUrl(sessionId), { withCredentials: true })
     const read = (handler) => (event) => {
       try {
         handler(JSON.parse(event.data))

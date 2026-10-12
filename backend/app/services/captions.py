@@ -17,8 +17,9 @@ screen is in that viewer's language:
 * the **spoke** line of whichever translator's audio is played to them: the
   peer's normally, their own in echo mode, exactly as `route_audio` decides
 
-Captions live in memory for the life of the call and are dropped with the
-session. Their text is never written to a log.
+Captions live in memory for the life of the call. Each line, once finished,
+is also handed to `on_final`, which saves it to the caller's call history
+(app/services/history.py). Their text is never written to a log.
 """
 
 from __future__ import annotations
@@ -66,6 +67,9 @@ class CaptionLog:
         self._next_id = 1
         self._watchers: set[asyncio.Queue] = set()
         self.closed = False
+        # Receives each line once it can no longer grow. Kept apart from the
+        # MAX_LINES window above, so a long call loses nothing.
+        self.on_final: Callable[[Line], None] | None = None
 
     # --- writing ----------------------------------------------------------
     def add(self, owner: "ParticipantId", kind: str, fragment: str) -> None:
@@ -79,6 +83,8 @@ class CaptionLog:
             text = fragment.lstrip()
             if not text:
                 return
+            if line is not None:            # the previous line in this stream is done
+                self._finish(line)
             line = Line(id=self._next_id, owner=owner, kind=kind, text=text,
                         t=round(now - self._started, 1), updated=now)
             self._next_id += 1
@@ -119,11 +125,21 @@ class CaptionLog:
     def watchers(self) -> int:
         return len(self._watchers)
 
+    def _finish(self, line: Line) -> None:
+        if self.on_final is None:
+            return
+        try:
+            self.on_final(replace(line))
+        except Exception:  # noqa: BLE001 - saving history must never hurt a call
+            pass
+
     def close(self) -> None:
-        """End every open stream and forget what was said."""
+        """Finish the open lines, end every open stream, forget what was said."""
         if self.closed:
             return
         self.closed = True
+        for line in sorted(self._current.values(), key=lambda l: l.id):
+            self._finish(line)
         for queue in self._watchers:
             try:
                 queue.put_nowait(None)
