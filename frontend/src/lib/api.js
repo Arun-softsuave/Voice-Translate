@@ -1,4 +1,8 @@
-const BASE = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000').replace(/\/$/, '')
+// A production build is served by the backend itself, so it calls its own
+// origin (''), whatever address that is. The Vite dev server on :5173 calls
+// the backend on :8000 directly.
+const DEFAULT_BASE = import.meta.env.DEV ? 'http://localhost:8000' : ''
+const BASE = (import.meta.env.VITE_API_URL ?? DEFAULT_BASE).replace(/\/$/, '')
 
 /**
  * The backend returns {error: {code, message}} for every failure and never

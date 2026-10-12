@@ -8,9 +8,10 @@ import logging
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import call, health
-from app.config import get_settings
+from app.config import BACKEND_DIR, get_settings
 from app.logging_config import configure_logging
 from app.websocket.media_stream import media_stream_endpoint
 
@@ -73,3 +74,13 @@ async def startup() -> None:
             "translation_enabled": settings.translation_enabled,
         },
     )
+
+
+# The built web page (`npm run build` in frontend/), served from this same
+# origin so one public address carries everything: the page at /, the API at
+# /api and /health, Twilio's audio at /ws. Mounted last, so every route above
+# wins. In development the page comes from Vite on :5173 instead, and without
+# a build this mount is simply skipped.
+FRONTEND_DIST = BACKEND_DIR.parent / "frontend" / "dist"
+if (FRONTEND_DIST / "index.html").is_file():
+    app.mount("/", StaticFiles(directory=FRONTEND_DIST, html=True), name="frontend")

@@ -1,0 +1,16 @@
+# Cloudflare Tunnel for https://voice.softsuaveai.space
+#
+# One hostname, one port: the backend on :8000 serves the built web page at /,
+# the API at /api and /health, and Twilio's media WebSocket at /ws. WebSockets
+# and the captions event stream pass through a tunnel without extra settings.
+#
+# The tunnel's credentials (<tunnel-id>.json) and cert.pem live in
+# %USERPROFILE%\.cloudflared, where `cloudflared tunnel login` / `create` put
+# them; cloudflared finds them there by the tunnel's name. Never commit them.
+
+tunnel: voice-translation
+
+ingress:
+  - hostname: voice.softsuaveai.space
+    service: http://localhost:8000
+  - service: http_status:404
