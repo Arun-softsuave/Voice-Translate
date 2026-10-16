@@ -1,0 +1,303 @@
+/* ===========================================================================
+   Brand panel — the left half of sign-in, request-access and setup.
+
+   Loaded after global.css and pages.css. Tokens only. The visual is SVG and
+   CSS; every animation here stops under prefers-reduced-motion (tokens.css),
+   and the SVG particles are not rendered at all then (BrandPanel.jsx).
+=========================================================================== */
+
+/* 52 / 48 on large screens; the form keeps its fixed measure either way. */
+@media (min-width: 1024px) {
+  .setup { grid-template-columns: minmax(0, 52fr) minmax(0, 48fr); }
+}
+
+.brand {
+  position: relative;
+  justify-content: flex-start;
+  gap: clamp(1rem, 2.6vh, 2rem);
+  padding: clamp(1.5rem, 4.5vh, 3.25rem) clamp(1.5rem, 5vw, 4.5rem);
+  overflow: hidden;
+  isolation: isolate;
+}
+
+/* Layered light: a green bloom behind the headline, a gold one behind the
+   visual. Kept faint so the form stays the brightest thing on screen. */
+.brand::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(60% 40% at 20% 18%, rgba(23, 74, 58, 0.45), transparent 70%),
+    radial-gradient(45% 35% at 50% 62%, rgba(201, 162, 39, 0.07), transparent 72%);
+}
+
+/* --- header --------------------------------------------------------------- */
+.brand__head {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+}
+
+.brand__mark {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  fill: none;
+  stroke: var(--gold);
+  stroke-width: 1.2;
+}
+.brand__mark .brand__wave { stroke: var(--gold-bright); stroke-width: 1.6; stroke-linejoin: round; }
+
+.brand__name {
+  display: grid;
+  font-size: var(--t-sm);
+  letter-spacing: var(--track-wide);
+  text-transform: uppercase;
+  color: var(--text);
+  font-weight: 600;
+  line-height: 1.3;
+}
+.brand__name small {
+  font-size: 0.625rem;
+  font-weight: 500;
+  color: var(--text-dim);
+  letter-spacing: var(--track-wide);
+}
+
+/* --- headline ------------------------------------------------------------- */
+.brand__copy .eyebrow { margin-bottom: var(--s3); }
+
+.brand__title {
+  font-size: clamp(2.4rem, 1rem + 2.9vw, 4.1rem);
+  max-width: 18ch;
+  margin-bottom: var(--s3);
+}
+
+.brand__lede { max-width: 44ch; }
+
+/* --- the visual ----------------------------------------------------------- */
+/* Drawn at the SVG's own proportions, so the labels can be pinned under the
+   nodes by percentage. As wide as the column allows, but never so tall that
+   the panel outgrows the screen; centred in whatever height is left. */
+.bridge-visual {
+  position: relative;
+  margin: auto 0;
+  width: min(100%, 600px, max(280px, (100svh - 470px) * 1.87));
+  aspect-ratio: 560 / 300;
+  align-self: center;
+  flex: none;
+}
+
+.bridge-svg { display: block; width: 100%; height: 100%; overflow: visible; }
+
+.bridge-svg__globe circle,
+.bridge-svg__globe ellipse,
+.bridge-svg__globe line {
+  fill: none;
+  stroke: rgba(242, 237, 225, 0.07);
+  stroke-width: 1;
+}
+.bridge-svg__globe circle:first-child { stroke: none; }
+
+.bridge-svg__orbit {
+  stroke: var(--gold-line) !important;
+  stroke-dasharray: 2 9;
+  transform-origin: 280px 150px;
+  animation: orbit 90s linear infinite;
+}
+
+.bridge-svg__arc {
+  fill: none;
+  stroke: url(#bridge-line);
+  stroke-width: 1.2;
+}
+
+/* A short bright dash travelling each way: words going over, words coming back. */
+.bridge-svg__flow {
+  fill: none;
+  stroke: var(--gold-bright);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-dasharray: 18 400;
+  opacity: 0.55;
+  animation: flow 3.6s linear infinite;
+}
+.bridge-svg__flow--back { animation-delay: 1.8s; }
+
+.bridge-svg__particle { fill: var(--gold-bright); }
+
+.bridge-svg__hub {
+  fill: var(--surface);
+  stroke: var(--gold-line);
+  stroke-width: 1;
+}
+
+.bridge-svg__pulse {
+  fill: none;
+  stroke: var(--gold);
+  stroke-width: 1;
+  opacity: 0;
+  transform-origin: 280px 150px;
+  animation: pulse-ring 3.6s var(--ease) infinite;
+}
+
+.bridge-svg__swap {
+  fill: none;
+  stroke: var(--gold-bright);
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.bridge-svg__ring { fill: none; stroke: var(--gold-line); stroke-width: 1; }
+.bridge-svg__disc { fill: var(--surface); stroke: var(--line-strong); stroke-width: 1; }
+
+.bridge-svg__bar {
+  fill: var(--gold);
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: speak 1.8s var(--ease) infinite alternate;
+}
+.bridge-svg__node--late .bridge-svg__bar { fill: var(--text-dim); animation-delay: 0.9s; }
+
+/* Each label hangs just under its node: nodes sit at x 86 and 474 of 560
+   (15.4% / 84.6%), centred at half height with a 40-unit ring (13.3%). */
+.bridge-visual__label {
+  position: absolute;
+  top: 66%;
+  transform: translateX(-50%);
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  white-space: nowrap;
+  font-size: var(--t-xs);
+  letter-spacing: var(--track-mid);
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.bridge-visual__label--left { left: 15.4%; }
+.bridge-visual__label.is-fresh { animation: greet 3.6s var(--ease) both; }
+.bridge-visual__label--right { left: 84.6%; }
+.bridge-visual__label b {
+  display: block;
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: 1.35rem;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text);
+  line-height: 1.25;
+}
+
+@keyframes orbit { to { transform: rotate(360deg); } }
+/* A greeting fades up, holds, and fades as the next one is due. */
+@keyframes greet {
+  0%   { opacity: 0; transform: translate(-50%, 6px); }
+  14%  { opacity: 1; transform: translate(-50%, 0); }
+  86%  { opacity: 1; transform: translate(-50%, 0); }
+  100% { opacity: 0; transform: translate(-50%, -4px); }
+}
+@keyframes flow {
+  from { stroke-dashoffset: 18; }
+  to   { stroke-dashoffset: -400; }
+}
+@keyframes pulse-ring {
+  0%   { opacity: 0.45; transform: scale(0.8); }
+  70%  { opacity: 0;    transform: scale(1.5); }
+  100% { opacity: 0;    transform: scale(1.5); }
+}
+@keyframes speak {
+  from { transform: scaleY(0.45); }
+  to   { transform: scaleY(1); }
+}
+
+/* --- feature highlights --------------------------------------------------- */
+.brand__features {
+  list-style: none;
+  margin: 0;
+  padding: var(--s4) 0 0;
+  border-top: 1px solid var(--line);
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--s4);
+}
+
+.feature { display: flex; gap: var(--s3); align-items: flex-start; }
+
+.feature__icon {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-full);
+  border: 1px solid var(--gold-line);
+  color: var(--gold);
+}
+.feature__icon svg { width: 16px; height: 16px; }
+
+.feature__text { display: grid; gap: 2px; font-size: var(--t-xs); color: var(--muted); line-height: 1.45; }
+.feature__text strong {
+  font-weight: 600;
+  letter-spacing: var(--track-wide);
+  text-transform: uppercase;
+  color: var(--text-soft);
+}
+
+/* --- footer --------------------------------------------------------------- */
+.brand__foot {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  font-size: var(--t-xs);
+  letter-spacing: var(--track-mid);
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.brand__bars { display: inline-flex; align-items: center; gap: 2px; height: 12px; }
+.brand__bars i { width: 2px; border-radius: 1px; background: var(--gold-line); }
+.brand__bars i:nth-child(1), .brand__bars i:nth-child(5) { height: 4px; }
+.brand__bars i:nth-child(2), .brand__bars i:nth-child(4) { height: 8px; }
+.brand__bars i:nth-child(3) { height: 12px; background: var(--gold); }
+
+/* The old footnote line is replaced by .brand__foot. */
+.brand .setup__mark { display: none; }
+
+/* --- smaller screens ------------------------------------------------------ */
+@media (max-width: 1279px) {
+  .brand__features { grid-template-columns: 1fr; gap: var(--s3); }
+  .feature__text { grid-template-columns: auto 1fr; gap: var(--s2); align-items: baseline; }
+}
+
+@media (max-width: 1023px) {
+  .feature__text { grid-template-columns: 1fr; gap: 2px; }
+}
+
+/* Short desktops: the feature notes give way before anything else does. */
+@media (min-width: 768px) and (max-height: 760px) {
+  .brand__features { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .feature__text span { display: none; }
+  .feature__text { grid-template-columns: 1fr; }
+}
+
+/* Phones: the form comes quickly. Headline, a compact strip of the visual,
+   no lede or feature list. */
+@media (max-width: 767px) {
+  .brand { gap: var(--s3); padding: var(--s5) var(--s5) var(--s4); }
+  .brand__title { font-size: clamp(2rem, 1.2rem + 4vw, 2.6rem); margin-bottom: 0; }
+  .brand__lede,
+  .brand__features,
+  .brand__foot { display: none; }
+  .bridge-visual { width: min(100%, 300px); margin: 0 auto var(--s3); }
+  .bridge-svg__globe { display: none; }
+  .bridge-visual__label b { font-size: 1.05rem; }
+}
+
+/* Reduced motion: greetings do not change (BrandPanel stops the timer), and
+   the fade must not run either, or its last frame would leave them hidden. */
+@media (prefers-reduced-motion: reduce) {
+  .bridge-visual__label.is-fresh { animation: none; }
+}

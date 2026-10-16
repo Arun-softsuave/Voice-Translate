@@ -81,7 +81,8 @@ def test_the_owner_email_cannot_be_requested(client):
 
 
 @pytest.mark.parametrize("password,why", [
-    ("short", "at least 12"),
+    ("short", "at least 8"),
+    ("12345678", "too common"),
     ("password1234", "too common"),
     ("aaaaaaaaaaaaaaaa", "too common"),
     ("priyaramanpriyaraman"[:10] + "xx", None),        # fine: 12 chars, not the name

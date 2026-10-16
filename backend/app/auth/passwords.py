@@ -11,13 +11,17 @@ from functools import lru_cache
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError
 
-MIN_LENGTH = 12
+MIN_LENGTH = 8
 MAX_LENGTH = 128
 
 _hasher = PasswordHasher()
 
 # Long enough to pass the length rule, common enough to be guessed first.
 COMMON = frozenset({
+    "password", "password1", "password12", "password123", "12345678", "123456789",
+    "1234567890", "87654321", "11111111", "00000000", "qwertyui", "qwerty123",
+    "abcd1234", "abc12345", "iloveyou", "admin123", "welcome1", "letmein1",
+    "sunshine", "princess", "football", "baseball", "changeme",
     "123456789012", "1234567890123", "12345678901234", "123456123456",
     "password1234", "password12345", "passwordpassword", "password@123",
     "qwertyuiop12", "qwertyuiopasdf", "qwerty123456", "1q2w3e4r5t6y",

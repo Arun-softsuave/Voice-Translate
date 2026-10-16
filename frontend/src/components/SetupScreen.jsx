@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 
 import { allows, firstCode } from '../lib/languages'
 import { format, normalise, validationMessage } from '../lib/phone'
+import { BrandPanel, pickPair } from './BrandPanel'
 import { Button, Field, Input, Select } from './ui'
 
 /**
@@ -16,6 +17,12 @@ export function SetupScreen({ onStart, busy, demoMode, sources, targets }) {
           ?? firstCode(targets, 'hi'),
   )
   const [phone, setPhone] = useState('+91')
+  // Every language either direction offers, for the brand panel.
+  const catalogue = useMemo(() => {
+    const seen = new Map(sources.map((l) => [l.code, l]))
+    for (const l of targets) if (!seen.has(l.code)) seen.set(l.code, l)
+    return [...seen.values()]
+  }, [sources, targets])
   const [touched, setTouched] = useState(false)
 
   // If the lists change under us — switching translation backend does exactly
@@ -69,18 +76,13 @@ export function SetupScreen({ onStart, busy, demoMode, sources, targets }) {
   // so Enter-to-submit is structurally untouched by the split layout.
   return (
     <form className="setup" onSubmit={submit}>
-      <div className="setup__brand enter">
-        <p className="eyebrow">Real-Time Interpretation</p>
-        <h1 className="display">
-          Speak freely.<br />
-          We <em>translate</em> as you talk.
-        </h1>
-        <p className="lede">
-          Your words reach them in their language, and theirs reach you in yours —
-          live, on an ordinary phone call.
-        </p>
-        <p className="setup__mark">Interpreter · R&amp;D preview</p>
-      </div>
+      {/* The bridge shows the pair being chosen on the right, as it changes. */}
+      <BrandPanel
+        heading={<>Speak freely.<br /><em>Understand</em> the world.</>}
+        lede="Your language should never be a barrier to a meaningful conversation. Speak naturally while we translate every word in real time."
+        pair={pickPair(catalogue, source, target)}
+        languageCount={catalogue.length}
+      />
 
       <div className="setup__form enter">
         <div className="setup__inner">

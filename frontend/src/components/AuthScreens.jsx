@@ -2,26 +2,27 @@ import { useState } from 'react'
 
 import { api } from '../lib/api'
 import { Link } from '../lib/router'
+import { BrandPanel } from './BrandPanel'
 import { Alert, Button, Field, Input, PasswordInput } from './ui'
 
-const MIN_PASSWORD = 12
+const MIN_PASSWORD = 8
 
 /**
  * Sign in, and ask for access. One page for members and admins alike: the
  * server decides who is an admin, and where each lands afterwards follows.
  *
- * Same editorial split as the setup screen: the brand on the open
+ * Same editorial split as the setup screen: the brand panel on the open
  * background, the form on the raised panel with its gold seam.
  */
-function AuthLayout({ heading, lede, children }) {
+function AuthLayout({ heading, lede, catalogue = [], children }) {
   return (
     <div className="setup auth">
-      <div className="setup__brand enter">
-        <p className="eyebrow">Real-Time Interpretation</p>
-        <h1 className="display">{heading}</h1>
-        <p className="lede">{lede}</p>
-        <p className="setup__mark">Interpreter · R&amp;D preview</p>
-      </div>
+      <BrandPanel
+        heading={heading}
+        lede={lede}
+        catalogue={catalogue}
+        languageCount={catalogue.length}
+      />
       <div className="setup__form enter">
         <div className="setup__inner">{children}</div>
       </div>
@@ -29,7 +30,7 @@ function AuthLayout({ heading, lede, children }) {
   )
 }
 
-export function LoginScreen({ onSignedIn }) {
+export function LoginScreen({ onSignedIn, catalogue }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
@@ -54,7 +55,8 @@ export function LoginScreen({ onSignedIn }) {
   return (
     <AuthLayout
       heading={<>Welcome <em>back</em>.</>}
-      lede="Sign in to place translated calls and read back every conversation."
+      lede="Sign in to place translated calls, and read back every conversation in both languages."
+      catalogue={catalogue}
     >
       <form onSubmit={submit} noValidate>
         <h2 className="auth__title">Sign in</h2>
@@ -102,7 +104,7 @@ export function LoginScreen({ onSignedIn }) {
   )
 }
 
-export function RequestAccessScreen() {
+export function RequestAccessScreen({ catalogue }) {
   const [form, setForm] = useState({ name: '', email: '', password: '' })
   const [touched, setTouched] = useState({})
   const [busy, setBusy] = useState(false)
@@ -143,6 +145,7 @@ export function RequestAccessScreen() {
       <AuthLayout
         heading={<>Request <em>received</em>.</>}
         lede="An administrator reviews every request. Once yours is approved, sign in with the email and password you just chose."
+        catalogue={catalogue}
       >
         <div className="auth__done" role="status">
           <span className="auth__seal" aria-hidden="true">✓</span>
@@ -160,6 +163,7 @@ export function RequestAccessScreen() {
     <AuthLayout
       heading={<>Ask for <em>access</em>.</>}
       lede="Tell us who you are. An administrator reviews each request; once it is approved, you sign in with the password you choose here."
+      catalogue={catalogue}
     >
       <form onSubmit={submit} noValidate>
         <h2 className="auth__title">Request access</h2>

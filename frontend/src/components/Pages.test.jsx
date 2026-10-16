@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 
 import { actionsFor } from './AdminPage'
+import { greetingPairs } from './BrandPanel'
 import { LoginScreen, RequestAccessScreen } from './AuthScreens'
 import { CallDetail, CallsTable } from './Calls'
 import { TopBar } from './TopBar'
@@ -44,7 +45,7 @@ describe('sign-in pages', () => {
     expect(html).toContain('autoComplete="name"')
     expect(html).toContain('autoComplete="email"')
     expect(html).toContain('autoComplete="new-password"')
-    expect(html).toContain('At least 12 characters')
+    expect(html).toContain('At least 8 characters')
     expect(html).toContain('Request access')
     expect(html).not.toContain('Sign up')
   })
@@ -109,5 +110,20 @@ describe('admin actions', () => {
     expect(actionsFor({ id: 2, status: 'rejected', role: 'user' }, me)).toEqual([])
     expect(actionsFor({ id: 1, status: 'active', role: 'admin' }, me)).toEqual([])
     expect(actionsFor({ id: 3, status: 'active', role: 'admin', owner: true }, me)).toEqual([])
+  })
+})
+
+describe('sign-in greetings', () => {
+  it('only greets in languages the app offers, two at a time', () => {
+    const pairs = greetingPairs([{ code: 'en' }, { code: 'ta' }, { code: 'fr' }, { code: 'ja' }])
+    expect(pairs.map((p) => p.map((g) => g.lang))).toEqual([['en', 'ta'], ['fr', 'ja']])
+  })
+
+  it('shows no fixed pair on the sign-in page', () => {
+    const html = renderToStaticMarkup(
+      <LoginScreen onSignedIn={() => {}} catalogue={[{ code: 'en' }, { code: 'ta' }]} />)
+    expect(html).toContain('Hello')
+    expect(html).toContain('Greetings in many languages')
+    expect(html).not.toContain('Hindi')
   })
 })

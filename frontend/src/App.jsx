@@ -143,8 +143,8 @@ export default function App() {
     return (
       <main className="shell">
         {route.name === 'request'
-          ? <RequestAccessScreen />
-          : <LoginScreen onSignedIn={signedIn} />}
+          ? <RequestAccessScreen catalogue={catalogue} />
+          : <LoginScreen onSignedIn={signedIn} catalogue={catalogue} />}
         <Toast tone="info" message={notice} onClose={() => setNotice(null)} />
       </main>
     )

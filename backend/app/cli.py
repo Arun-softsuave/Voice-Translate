@@ -23,7 +23,7 @@ def main(argv: list[str] | None = None) -> int:
     cmd.add_argument("--name", help="display name, for a new account")
     args = parser.parse_args(argv)
 
-    password = getpass.getpass("New password (12+ characters): ")
+    password = getpass.getpass("New password (8+ characters): ")
     if password != getpass.getpass("Type it again: "):
         print("The two passwords don't match. Nothing changed.", file=sys.stderr)
         return 1
