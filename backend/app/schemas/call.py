@@ -78,6 +78,20 @@ class StartCallRequest(BaseModel):
         return value
 
 
+class DigitsRequest(BaseModel):
+    """Keys pressed on the in-call dial pad.
+
+    Capped short on purpose: a menu choice is one or two keys, and a long
+    string would hold the far leg silent while its tones played out.
+    """
+
+    digits: str = Field(min_length=1, max_length=8, pattern=r"^[0-9*#A-Da-d]+$")
+
+
+class IvrModeRequest(BaseModel):
+    enabled: bool
+
+
 class StartCallResponse(BaseModel):
     session_id: str
     status: str
@@ -90,4 +104,7 @@ class SessionResponse(BaseModel):
     uptime_s: float
     error: str | None = None
     end_reason: str | None = None
+    ivr_mode: bool = False
+    answered_by: str | None = None
+    far_backlog_s: float = 0.0
     participants: dict

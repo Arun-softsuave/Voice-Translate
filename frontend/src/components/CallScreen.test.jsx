@@ -119,3 +119,101 @@ describe('CallScreen far side', () => {
     expect(html).not.toContain('call__note')
   })
 })
+
+describe('CallScreen keypad', () => {
+  it('offers a keypad once the far end can hear it', () => {
+    expect(render({})).toContain('Keypad')
+  })
+
+  it('offers no keypad while the phone is still ringing', () => {
+    const html = render({
+      state: State.RINGING,
+      session: { participants: { A: { connected: true }, B: { connected: false } } },
+    })
+    expect(html).not.toContain('Keypad')
+  })
+
+  it('offers no keypad once the call is over', () => {
+    const html = render({
+      state: State.ENDED,
+      endReason: 'completed',
+      session: { participants: { A: { connected: false }, B: { connected: false } } },
+    })
+    expect(html).not.toContain('Keypad')
+  })
+
+  it('keeps the keys out of the way until they are asked for', () => {
+    expect(render({})).not.toContain('dialpad__keys')
+  })
+
+  it('says plainly when the other side is being read rather than heard', () => {
+    const html = render({
+      session: {
+        ivr_mode: true,
+        participants: { A: { connected: true }, B: { connected: true } },
+      },
+    })
+    expect(html).toContain('You are reading the other side, not hearing it.')
+  })
+
+  it('says nothing about reading on an ordinary call', () => {
+    expect(render({})).not.toContain('not hearing it')
+  })
+})
+
+describe('Captions of keys pressed', () => {
+  const pressed = { id: 4, speaker: 'you', kind: 'pressed', text: '12', t: 9 }
+
+  it('shows the keys sent to a menu, as keys rather than speech', () => {
+    const html = render({ captions: [pressed] })
+    expect(html).toContain('You pressed')
+    expect(html).toContain('cap--pressed')
+    expect(html).toContain('12')
+  })
+
+  it('does not dress a keypress up as something that was said', () => {
+    const html = render({ captions: [pressed] })
+    expect(html).not.toContain('You said')
+    expect(html).not.toContain('They said')
+  })
+})
+
+describe('CallScreen voicemail', () => {
+  const answered = (extra) => render({
+    session: {
+      participants: { A: { connected: true }, B: { connected: true } },
+      ...extra,
+    },
+  })
+
+  it('tells the caller when voicemail is ready for their message', () => {
+    expect(answered({ answered_by: 'machine_end_beep' }))
+      .toContain('Voicemail — speak your message now.')
+  })
+
+  it('says a recording answered when the greeting is still playing', () => {
+    expect(answered({ answered_by: 'machine_start' })).toContain('A recording answered.')
+  })
+
+  it('says nothing when a person answered', () => {
+    expect(answered({ answered_by: 'human' })).not.toContain('Voicemail')
+  })
+
+  it('says nothing when the detector could not tell', () => {
+    const html = answered({ answered_by: 'unknown' })
+    expect(html).not.toContain('Voicemail')
+    expect(html).not.toContain('recording')
+  })
+
+  it('warns that hanging up now would cut off the translation', () => {
+    const html = answered({ far_backlog_s: 4.2 })
+    expect(html).toContain('hanging up now would cut it off')
+    expect(html).toContain('End call anyway')
+  })
+
+  it('does not nag when nothing is left to play', () => {
+    const html = answered({ far_backlog_s: 0 })
+    expect(html).not.toContain('cut it off')
+    expect(html).toContain('End call<')
+  })
+})

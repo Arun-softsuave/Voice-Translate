@@ -545,12 +545,84 @@ select.control option { background: var(--raised); color: var(--text); }
 .controls .btn { flex: 1; }
 
 /* ---------------------------------------------------------------------------
+   The keypad — for answering a recorded menu. Hidden until asked for, so an
+   ordinary call between two people never sees it.
+--------------------------------------------------------------------------- */
+.pad {
+  display: grid;
+  gap: var(--s3);
+  justify-items: center;
+  padding: var(--s3) clamp(1.25rem, 4vw, 3rem) 0;
+}
+
+.dialpad { display: grid; gap: var(--s2); justify-items: center; }
+
+.dialpad__sent {
+  margin: 0;
+  min-height: 1.25rem;
+  font-size: var(--t-xs);
+  letter-spacing: var(--track-mid);
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.dialpad__sent b {
+  font-family: var(--font-mono);
+  font-size: var(--t-md);
+  letter-spacing: 0.2em;
+  color: var(--gold-bright);
+}
+.dialpad__hint { color: var(--text-dim); text-transform: none; letter-spacing: 0; }
+
+.dialpad__keys {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--s2);
+}
+
+.dialpad__key {
+  width: 64px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  gap: 0;
+  border-radius: var(--r-md);
+  background: var(--raised);
+  border: 1px solid var(--line-strong);
+  color: var(--text);
+  cursor: pointer;
+  transition: background var(--fast) var(--ease), border-color var(--fast) var(--ease);
+}
+.dialpad__key:hover:not(:disabled) { border-color: var(--gold-line); background: var(--raised-hi); }
+.dialpad__key:active:not(:disabled) { background: var(--gold-wash); }
+.dialpad__key:disabled { opacity: 0.5; cursor: default; }
+
+.dialpad__digit { font-family: var(--font-display); font-size: 1.35rem; line-height: 1; }
+.dialpad__letters {
+  font-size: 0.5rem;
+  letter-spacing: 0.16em;
+  color: var(--text-dim);
+  min-height: 0.6rem;
+}
+
+.pad__mode { display: grid; justify-items: center; gap: var(--s1); text-align: center; }
+.pad__note { font-size: var(--t-xs); color: var(--text-dim); max-width: 34ch; }
+
+.call__note--mode { color: var(--gold); }
+.call__note--wait { color: var(--wait); }
+
+@media (max-width: 767px) {
+  .dialpad__key { width: 56px; height: 44px; }
+}
+
+/* ---------------------------------------------------------------------------
    Toast — offset above the control bar so it never covers "End call".
 
    The toast is position:fixed and lives outside .call, so --foot-h has to be
    set on a scope that reaches both. body:has() is that scope.
 --------------------------------------------------------------------------- */
 body:has(.call) { --foot-h: 128px; }
+/* The keypad grows the footer, and the toast must still clear "End call". */
+body:has(.pad) { --foot-h: 400px; }
 
 @media (max-width: 767px) {
   body:has(.call) { --foot-h: 148px; }
@@ -897,6 +969,18 @@ body:has(.call) { --foot-h: 128px; }
   border-start-start-radius: 4px;
   color: var(--text-soft);
   font-size: var(--t-md);
+}
+
+/* Keys pressed on a far-end menu. Not words, so not shaped like them. */
+.cap--pressed .cap__keys {
+  background: none;
+  border: 1px dashed var(--gold-line);
+  color: var(--gold-bright);
+  font-family: var(--font-mono);
+  font-size: 1.0625rem;
+  letter-spacing: 0.22em;
+  padding: var(--s2) var(--s3);
+  justify-self: start;
 }
 
 /* Theirs: the reason the panel exists, so larger and brighter. */

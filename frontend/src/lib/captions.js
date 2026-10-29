@@ -3,7 +3,9 @@
  *
  * The backend streams lines already filtered for this viewer and already in
  * this viewer's language (see backend/app/services/captions.py):
- *   {id, speaker: 'you' | 'them', text, lang, from, t}
+ *   {id, speaker: 'you' | 'them', kind, text, lang, from, t}
+ * `kind` is 'heard' | 'spoke' | 'pressed'; a 'pressed' line is keypad digits
+ * the caller sent to a menu, so it has no language and no translation.
  * Every event carries a line's FULL text so far, so updating is a replace by
  * id and a missed event can never leave a line garbled.
  */

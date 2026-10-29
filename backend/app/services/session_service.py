@@ -4,9 +4,17 @@ Design doc §8/§9. THE rule, stated once and implemented once:
 
     Audio received on leg X is played only into the peer of X.
 
-`route_audio` is the only function in the codebase that writes call audio to a
+`_write` is the only function in the codebase that writes call audio to a
 Twilio stream. Nothing else may do it. That is what makes cross-talk between
 concurrent calls structurally impossible rather than merely unlikely.
+
+It has exactly two public ways in, and both pick their destination from the
+session alone, never from anything a caller passes:
+
+* `route_audio` — relayed speech, obeying the rule above.
+* `inject_signal` — audio this server generated itself (keypad tones). It
+  carries nobody's voice, so the rule does not apply to it and pretending it
+  came from a leg would be a lie future readers would act on.
 """
 
 from __future__ import annotations
@@ -32,6 +40,10 @@ log = logging.getLogger(__name__)
 # How long an ended call stays readable, so the browser can learn *why* it
 # ended (busy, no answer, ...) after its own leg has already been hung up.
 ENDED_TTL_S = 120.0
+
+# Kept quiet for a moment after the last tone, so the trailing edge is not
+# clipped by the next thing we queue.
+DTMF_GUARD_S = 0.2
 
 
 class SessionRegistry:
@@ -228,6 +240,25 @@ async def route_audio(
         destination.dropped_no_peer += 1
         return False
 
+    return await _write(destination, payload_b64)
+
+
+async def inject_signal(session: TranslationSession, target: ParticipantId,
+                        payload_b64: str) -> bool:
+    """Play audio this server generated into one leg. Never anyone's voice.
+
+    Used for keypad tones. A leg that is not streaming is not a dropped frame
+    of someone's speech, so this does not touch `dropped_no_peer`; the caller
+    is told nothing was sent and says so.
+    """
+    destination = session.participant(target)
+    if not destination.connected:
+        return False
+    return await _write(destination, payload_b64)
+
+
+async def _write(destination: Participant, payload_b64: str) -> bool:
+    """THE one place that writes call audio to a Twilio stream."""
     sent = await proto.send(
         destination.ws, proto.build_media(destination.stream_sid, payload_b64)
     )
@@ -267,6 +298,47 @@ async def clear_playback(session: TranslationSession, target: ParticipantId) -> 
         },
     )
     return max(dropped, 0.0)
+
+
+class NotStreaming(Exception):
+    """The leg has no media stream, so nothing can be played into it."""
+
+
+async def send_digits(session: TranslationSession, digits: str) -> float:
+    """Play keypad tones into the far leg. Returns the milliseconds sent.
+
+    Whatever translation is queued for that leg is dropped first. A menu's
+    translation can be ten seconds long, and a tone played after it would
+    arrive long past the moment the menu was listening for it.
+
+    Raises `NotStreaming` if the far leg has no media stream.
+    """
+    async with session.dtmf_lock:
+        if not session.b.connected:
+            raise NotStreaming()
+
+        blobs = audio.ulaw_dtmf_burst(digits)
+        total_ms = sum(audio.duration_ms(blob) for blob in blobs)
+
+        # Claimed before the first await, so nothing can be queued between the
+        # tones and no barge-in can clear them while they play.
+        session.b.quiet_until = (
+            time.monotonic() + total_ms / 1000 + DTMF_GUARD_S
+        )
+
+        cleared = await clear_playback(session, ParticipantId.B)
+        for blob in blobs:
+            await inject_signal(session, ParticipantId.B,
+                                audio.b64_encode(blob))
+
+        session.b.digits_out += len(blobs)
+        # The digits themselves are never logged: they may be a PIN.
+        log.info(
+            "dtmf_sent",
+            extra={"session_id": session.session_id, "digits": len(blobs),
+                   "tone_ms": round(total_ms), "cleared_ms": round(cleared)},
+        )
+        return total_ms
 
 
 async def send_mark(

@@ -163,8 +163,15 @@ async def media_stream_endpoint(ws: WebSocket) -> None:
                 # Talking over the translation they are hearing cuts it, but
                 # only on sustained, clearly direct speech: not a cough, line
                 # noise, or the translation's own echo in their microphone.
+                #
+                # A machine does not take turns: its menu runs straight through
+                # whatever we are saying, so letting it cut us means our own
+                # words are thrown away mid-sentence. And a keypad tone must
+                # survive being played over. Neither holds for a human call,
+                # where both guards are inert.
+                cuttable = not session.ivr_mode and now >= participant.quiet_until
                 playing = session_service.playback_backlog_s(participant, now) > 0
-                if barge.feed(level, playing=playing):
+                if cuttable and barge.feed(level, playing=playing):
                     log.debug("barge_in",
                               extra={"session_id": session.session_id,
                                      "participant": pid.value, "playing": playing})
@@ -327,7 +334,15 @@ async def _open_translator(settings, session, pid: ParticipantId):
 
         if is_speech:
             hearer.last_speech_out_at = now
-        elif _skip_filler(hearer, now):
+
+        if _suppressed(session, listener, hearer, now):
+            # In IVR mode the far side is read, not heard; and nothing may be
+            # queued on top of a keypad tone that is still playing. The
+            # caption was already written either way, by `caption` below.
+            hearer.suppressed_ms += len(raw) / 8
+            return
+
+        if not is_speech and _skip_filler(hearer, now):
             # Near-silent filler with audio already queued: queueing it would
             # only make the next real speech wait behind it.
             hearer.silence_skipped_ms += len(raw) / 8
@@ -425,6 +440,18 @@ async def _adopt_or_open_translator(settings, session, pid: ParticipantId):
                "stream_to_ready_ms": waited},
     )
     return translator
+
+
+def _suppressed(session, listener: ParticipantId, hearer, now: float) -> bool:
+    """Should this translated chunk be left unplayed entirely?
+
+    Two reasons, both deliberate and both off by default: the listener is
+    reading the far side rather than hearing it (IVR mode), or a keypad tone
+    is still playing into this leg and must not be talked over.
+    """
+    if session.ivr_mode and listener is ParticipantId.A:
+        return True
+    return now < hearer.quiet_until
 
 
 def _skip_filler(hearer, now: float) -> bool:

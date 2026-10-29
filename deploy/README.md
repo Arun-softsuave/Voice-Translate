@@ -66,6 +66,31 @@ start, never committed). Back it up by copying it. Moving to another computer:
 copy `backend/.env` **and** `backend/data/app.db` along with the tunnel
 credentials.
 
+## Automated menus and voicemail
+
+Calls that reach a recorded menu ("press one for sales") need two things the
+call screen now has:
+
+* **Keypad** — a third button beside Mute, once the far end has answered. The
+  two legs of a translated call are never joined inside Twilio, so a keypress
+  is sent to the backend, which plays the tone down the other line. Keys
+  pressed are saved with the transcript.
+* **Read the menu** — inside the keypad panel. A menu is spoken straight
+  through, so its spoken translation arrives sentence by sentence long after
+  the menu stopped listening. This stops playing it and leaves the captions,
+  which arrive at once. It also stops the menu's voice cutting off what you
+  are saying into it.
+
+Neither needs any Twilio configuration. `DETECT_MACHINES=true` additionally
+asks Twilio whether a person or voicemail answered, which puts "Voicemail —
+speak your message now" on the screen; it costs a small fee per call and is
+occasionally wrong, so it is off by default.
+
+Whether a far-end menu accepts our tones depends on the carrier, and can only
+be confirmed by a real call. To test safely, point one of your own Twilio
+numbers at a TwiML Bin containing a `<Gather input="dtmf">` that reads the
+digit back, and call it from the app.
+
 ## Before sharing the link
 
 Sign-in keeps strangers from placing calls. Cloudflare Access (Zero Trust →

@@ -6,6 +6,7 @@ belongs to whom, which is what makes the routing rule in §8 enforceable.
 
 from __future__ import annotations
 
+import asyncio
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -60,6 +61,13 @@ class Participant:
     last_speech_out_at: float | None = None  # last translated *speech* sent here
     silence_skipped_ms: float = 0.0     # model filler we chose not to queue
 
+    # While a keypad tone is being played into this leg, nothing else may be
+    # queued behind it and no barge-in may clear it (monotonic deadline; 0.0
+    # on every call where nobody presses a key).
+    quiet_until: float = 0.0
+    digits_out: int = 0                 # keypad tones played into this leg
+    suppressed_ms: float = 0.0          # translated speech we chose not to play
+
     # Latency instrumentation (monotonic seconds; never what was said).
     answered_at: float | None = None    # Twilio: the phone was picked up
     twiml_at: float | None = None       # Twilio fetched our TwiML
@@ -81,6 +89,13 @@ class TranslationSession:
     status: CallStatus = CallStatus.CONNECTING
     created_at: float = field(default_factory=time.monotonic)
     error: str | None = None
+    # What picked up the phone, when Twilio was asked to tell us: "human",
+    # "machine_end_beep" (voicemail, ready to record), "fax", "unknown", ...
+    answered_by: str | None = None
+    # Talking to a machine: the far side's translation is read on screen
+    # instead of being spoken, because a menu read aloud arrives long after
+    # the moment to press a key has passed. Off unless the user asks for it.
+    ivr_mode: bool = False
     # Why the call ended, from Twilio's CallStatus or our own hang-up:
     # busy | declined | no-answer | failed | canceled | completed | user_ended
     end_reason: str | None = None
@@ -103,6 +118,9 @@ class TranslationSession:
                                  ParticipantId.B: LatencyTracker("B")},
         repr=False,
     )
+    # One keypad burst at a time: two overlapping bursts would interleave
+    # their tones and the far end would hear neither digit.
+    dtmf_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
 
     def participant(self, pid: ParticipantId) -> Participant:
         return self.a if pid is ParticipantId.A else self.b
@@ -122,6 +140,12 @@ class TranslationSession:
             "uptime_s": round(time.monotonic() - self.created_at, 1),
             "error": self.error,
             "end_reason": self.end_reason,
+            "ivr_mode": self.ivr_mode,
+            "answered_by": self.answered_by,
+            # Seconds of translated speech still queued at Twilio for the far
+            # side: what the caller would cut off by hanging up now.
+            "far_backlog_s": round(
+                max(0.0, self.b.playout_until - time.monotonic()), 1),
             "participants": {
                 p.participant_id.value: {
                     "kind": p.kind,
@@ -132,6 +156,7 @@ class TranslationSession:
                     "dropped_no_peer": p.dropped_no_peer,
                     "played_ms": round(p.played_ms),
                     "answered": p.answered_at is not None,
+                    "digits_out": p.digits_out,
                 }
                 for p in (self.a, self.b)
             },

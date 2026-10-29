@@ -26,6 +26,7 @@ export function useCall() {
   const [muted, setMuted] = useState(false)
   const [levels, setLevels] = useState({ input: 0, output: 0 })
   const [seconds, setSeconds] = useState(0)
+  const [digits, setDigits] = useState('')      // keys pressed on this call
 
   const voice = useRef(null)
   const stateRef = useRef(state)
@@ -40,6 +41,9 @@ export function useCall() {
     voice.current?.disconnect()
     voice.current = null
   }, [])
+
+  /** Something went wrong, but the call is fine and carries on. */
+  const warn = useCallback((message) => setError(message), [])
 
   /** Duration ticks only while the media path is actually open. */
   useEffect(() => {
@@ -174,6 +178,31 @@ export function useCall() {
     setMuted(next)
   }, [])
 
+  // Unlike mute, which the browser does by itself, a keypress has to travel to
+  // the server and be played down the other line — so it can fail, and the
+  // caller has to be told, or they will press again into a menu that is gone.
+  const sendDigit = useCallback(async (digit) => {
+    if (!sessionId) return
+    setDigits((d) => d + digit)
+    try {
+      await api.sendDigits(sessionId, digit)
+    } catch (problem) {
+      setDigits((d) => d.slice(0, -1))
+      warn(problem.message || 'That key could not be sent.')
+    }
+  }, [sessionId, warn])
+
+  const setIvrMode = useCallback(async (enabled) => {
+    if (!sessionId) return
+    setSession((s) => (s ? { ...s, ivr_mode: enabled } : s))   // answer the tap at once
+    try {
+      setSession(await api.setIvrMode(sessionId, enabled))
+    } catch (problem) {
+      setSession((s) => (s ? { ...s, ivr_mode: !enabled } : s))
+      warn(problem.message || 'That could not be changed.')
+    }
+  }, [sessionId, warn])
+
   const reset = useCallback(() => {
     attempt.current += 1
     voice.current?.disconnect()
@@ -185,6 +214,7 @@ export function useCall() {
     setEndReason(null)
     setError(null)
     setSeconds(0)
+    setDigits('')
     setLevels({ input: 0, output: 0 })
   }, [])
 
@@ -207,9 +237,12 @@ export function useCall() {
     muted,
     levels,
     seconds,
+    digits,
     start,
     hangUp,
     toggleMute,
+    sendDigit,
+    setIvrMode,
     reset,
     leave,
     dismissError: () => setError(null),

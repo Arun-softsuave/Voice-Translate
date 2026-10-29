@@ -16,7 +16,7 @@ from sqlalchemy import update
 
 from app.db.engine import session_scope
 from app.db.models import ENDED, FAILED, IN_PROGRESS, Call, TranscriptLine, utcnow
-from app.services.captions import HEARD, Line
+from app.services.captions import HEARD, PRESSED, Line
 
 if TYPE_CHECKING:  # pragma: no cover
     from app.models.session import TranslationSession
@@ -61,8 +61,13 @@ def line_sink(session: "TranslationSession") -> Callable[[Line], None]:
         if session.call_id is None or not text:
             return
         owner = session.participant(line.owner)
-        # A translator speaks the other person's language (see view()).
-        lang = owner.language if line.kind == HEARD else session.peer_of(line.owner).language
+        if line.kind == PRESSED:
+            lang = ""                       # keypad digits are in no language
+        elif line.kind == HEARD:
+            lang = owner.language
+        else:
+            # A translator speaks the other person's language (see view()).
+            lang = session.peer_of(line.owner).language
         try:
             with session_scope() as db:
                 db.add(TranscriptLine(
@@ -103,6 +108,18 @@ def record_failed(session: "TranslationSession", reason: str) -> None:
                 status=FAILED, end_reason=reason[:32], ended_at=utcnow()))
     except Exception:  # noqa: BLE001
         _failed("failed", session)
+
+
+def record_answered_by(session: "TranslationSession", verdict: str | None) -> None:
+    """A person or a machine picked up, so the history can say which."""
+    if session.call_id is None or not verdict:
+        return
+    try:
+        with session_scope() as db:
+            db.execute(update(Call).where(Call.id == session.call_id).values(
+                answered_by=verdict[:24]))
+    except Exception:  # noqa: BLE001
+        _failed("answered_by", session)
 
 
 def add_model_cost(session: "TranslationSession", usd: float) -> None:

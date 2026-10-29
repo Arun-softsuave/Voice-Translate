@@ -83,8 +83,12 @@ class Window:
 
 logins = Backoff()
 access_requests = Window(limit=5, period_s=60 * 60.0)
+# Keypad presses on one call. Generous for a human pressing keys, low enough
+# that a stuck key cannot hold the far leg silent under a stream of tones.
+digits = Window(limit=20, period_s=10.0)
 
 
 def reset() -> None:
     logins.clear()
     access_requests.clear()
+    digits.clear()

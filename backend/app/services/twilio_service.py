@@ -134,6 +134,19 @@ class TwilioClient:
 
     def _create_call(self, to: str, session_id: str) -> str:
         s = self._settings
+        extra = {}
+        if s.detect_machines:
+            # Asynchronous: the call connects immediately and the verdict
+            # arrives separately, so nobody waits on the detector. We ask for
+            # the end of the greeting, which is what tells us the beep has
+            # passed and a message can be left.
+            extra = {
+                "machine_detection": "DetectMessageEnd",
+                "async_amd": "true",
+                "async_amd_status_callback":
+                    f"{s.backend_public_url}/api/call/answered-by",
+                "async_amd_status_callback_method": "POST",
+            }
         call = self._client.calls.create(
             to=to,
             from_=s.twilio_phone_number,
@@ -142,6 +155,7 @@ class TwilioClient:
             status_callback_event=["initiated", "ringing", "answered", "completed"],
             status_callback_method="POST",
             timeout=s.ring_timeout_s,
+            **extra,
         )
         return call.sid
 

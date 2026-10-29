@@ -124,6 +124,14 @@ export const api = {
 
   end: (sessionId) => request(`/api/call/end/${sessionId}`, { method: 'POST' }),
 
+  /** Press keys on the far end's keypad, for menus that ask for a digit. */
+  sendDigits: (sessionId, digits) =>
+    request(`/api/call/${sessionId}/digits`, { method: 'POST', body: { digits } }),
+
+  /** Read the other side's translation instead of hearing it spoken. */
+  setIvrMode: (sessionId, enabled) =>
+    request(`/api/call/${sessionId}/ivr-mode`, { method: 'POST', body: { enabled } }),
+
   /** Server-Sent Events stream of live captions for one side of the call. */
   captionsUrl: (sessionId, viewer = 'A') =>
     `${BASE}/api/call/${encodeURIComponent(sessionId)}/captions?viewer=${viewer}`,

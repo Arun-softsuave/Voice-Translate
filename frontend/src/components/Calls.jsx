@@ -99,16 +99,24 @@ export function CallDetail({ call, catalogue, showUser = false, back }) {
             <article
               key={`${line.owner}${line.id}`}
               className={`cap cap--${line.side === 'caller' ? 'you' : 'them'}` +
-                (line.translation ? ' cap--translation' : '')}
+                (line.translation ? ' cap--translation' : '') +
+                (line.pressed ? ' cap--pressed' : '')}
             >
               <div className="cap__meta">
                 <span>
                   {line.side === 'caller' ? 'Caller' : 'They'}
-                  {line.translation ? ` · translated to ${lang(line.lang)}` : ' said'}
+                  {line.pressed && ' pressed'}
+                  {line.translation && ` · translated to ${lang(line.lang)}`}
+                  {!line.pressed && !line.translation && ' said'}
                 </span>
                 <time>{duration(line.t)}</time>
               </div>
-              <p className="cap__text" lang={line.lang}>{line.text}</p>
+              <p
+                className={`cap__text${line.pressed ? ' cap__keys' : ''}`}
+                lang={line.lang || undefined}
+              >
+                {line.text}
+              </p>
             </article>
           ))}
         </div>

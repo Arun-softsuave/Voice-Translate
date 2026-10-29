@@ -44,6 +44,7 @@ MAX_QUEUED = 1000
 
 HEARD = "heard"
 SPOKE = "spoke"
+PRESSED = "pressed"        # keys the caller sent to a far-end menu, not speech
 
 
 @dataclass
@@ -156,7 +157,13 @@ def view(line: Line, viewer: "ParticipantId", session: "TranslationSession",
     owner = session.participant(line.owner)
     listener = session.participant(line.owner if echo_mode else line.owner.peer)
 
-    if line.kind == HEARD:
+    if line.kind == PRESSED:
+        # Keys the caller pressed. Not speech, so it has no language and is
+        # shown only to the person who pressed them.
+        if line.owner is not viewer:
+            return None
+        speaker, lang, source = "you", None, None
+    elif line.kind == HEARD:
         if line.owner is not viewer:
             return None
         speaker, lang, source = "you", owner.language, None

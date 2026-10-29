@@ -186,10 +186,13 @@ export default function App() {
           demoMode={demoMode}
           captions={captions.lines}
           endReason={call.endReason}
+          digits={call.digits}
           now={captions.now}
           onHangUp={call.hangUp}
           onToggleMute={call.toggleMute}
           onReset={call.reset}
+          onSendDigit={call.sendDigit}
+          onSetIvrMode={call.setIvrMode}
         />
       )}
 

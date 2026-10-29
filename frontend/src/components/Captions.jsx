@@ -41,6 +41,22 @@ export function Captions({ lines, now, language, catalogue = [] }) {
           lines.map((line) => {
             const live = isLive(line, lines, now)
             const you = line.speaker === 'you'
+            const pressed = line.kind === 'pressed'
+
+            // Keys pressed on a menu are not speech: no language, no
+            // translation, and nothing to mistake for something said.
+            if (pressed) {
+              return (
+                <article key={line.id} className="cap cap--you cap--pressed">
+                  <div className="cap__meta">
+                    <span>You pressed</span>
+                    <time>{stamp(line.t)}</time>
+                  </div>
+                  <p className="cap__text cap__keys">{line.text}</p>
+                </article>
+              )
+            }
+
             return (
               <article
                 key={line.id}

@@ -10,19 +10,22 @@ import time
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 
+from app.auth import ratelimit
 from app.auth.deps import CurrentUser, current_user, same_origin
 from app.config import Settings, get_settings
 from app.logging_config import mask_phone
 from app.models.session import CallStatus, ParticipantId
 from app.schemas.call import (
+    DigitsRequest,
+    IvrModeRequest,
     SessionResponse,
     StartCallRequest,
     StartCallResponse,
     TokenRequest,
     TokenResponse,
 )
-from app.services import history, twilio_service
-from app.services.captions import view
+from app.services import history, session_service, twilio_service
+from app.services.captions import PRESSED, view
 from app.services.session_service import registry
 from app.websocket.media_stream import prewarm_translator
 
@@ -208,6 +211,36 @@ async def status_callback(request: Request, settings: Settings = Depends(_settin
     return Response(status_code=204)
 
 
+@router.post("/answered-by")
+async def answered_by(request: Request, settings: Settings = Depends(_settings)):
+    """Twilio's verdict on what picked up: a person, or a machine.
+
+    It arrives on its own, a few seconds after the call connects, because the
+    call is not held up waiting for it. All we do is remember it, so the page
+    can say "voicemail — start speaking" instead of leaving the caller to work
+    it out from a greeting they do not speak.
+    """
+    form = dict(await request.form())
+    if not twilio_service.validate_signature(
+        settings,
+        twilio_service.public_url_for(settings, request),
+        form,
+        request.headers.get("X-Twilio-Signature"),
+    ):
+        raise HTTPException(403, {"code": "INVALID_SIGNATURE", "message": "Rejected."})
+
+    found = registry.find_by_call_sid(form.get("CallSid", ""))
+    if not found:
+        return Response(status_code=204)
+
+    session, _ = found
+    session.answered_by = form.get("AnsweredBy") or None
+    history.record_answered_by(session, session.answered_by)
+    log.info("answered_by", extra={"session_id": session.session_id,
+                                   "answered_by": session.answered_by})
+    return Response(status_code=204)
+
+
 @router.post("/end/{session_id}", dependencies=[Depends(same_origin)])
 async def end_call(session_id: str, settings: Settings = Depends(_settings),
                    user: CurrentUser = Depends(current_user)):
@@ -225,6 +258,52 @@ async def end_call(session_id: str, settings: Settings = Depends(_settings),
     _teardown(session, settings, reason="user_ended" if answered else "canceled")
     return {"session_id": session_id, "status": session.status.value,
             "end_reason": session.end_reason}
+
+
+@router.post("/{session_id}/digits", dependencies=[Depends(same_origin)])
+async def send_digits(session_id: str, body: DigitsRequest,
+                      user: CurrentUser = Depends(current_user)):
+    """Press keys on the far end's keypad, for menus that ask for a digit."""
+    session = _owned(registry.get(session_id), user)
+
+    wait = ratelimit.digits.hit(f"{user.id}:{session_id}")
+    if wait:
+        seconds = max(1, int(wait + 0.999))
+        raise HTTPException(429, {"code": "TOO_MANY_ATTEMPTS",
+                                  "message": f"Slow down. Try again in {seconds} s."},
+                            headers={"Retry-After": str(seconds)})
+
+    try:
+        await session_service.send_digits(session, body.digits)
+    except session_service.NotStreaming:
+        raise HTTPException(409, {
+            "code": "NOT_CONNECTED",
+            "message": "The other side is not connected yet.",
+        }) from None
+
+    # So the call history shows which keys were pressed, and when. Pressed in
+    # quick succession they join into one line, which is how you read them.
+    for digit in body.digits:
+        session.captions.add(ParticipantId.A, PRESSED, digit)
+
+    return {"session_id": session_id, "sent": len(body.digits)}
+
+
+@router.post("/{session_id}/ivr-mode", response_model=SessionResponse,
+             dependencies=[Depends(same_origin)])
+async def set_ivr_mode(session_id: str, body: IvrModeRequest,
+                       user: CurrentUser = Depends(current_user)):
+    """Read the far side instead of hearing it.
+
+    A recorded menu is spoken straight through, so its translation arrives
+    sentence by sentence long after the menu asked for a key. On screen it
+    arrives at once.
+    """
+    session = _owned(registry.get(session_id), user)
+    session.ivr_mode = body.enabled
+    log.info("ivr_mode", extra={"session_id": session_id,
+                                "enabled": body.enabled})
+    return SessionResponse(**session.snapshot())
 
 
 @router.get("/{session_id}/captions")

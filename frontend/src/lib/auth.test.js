@@ -111,4 +111,13 @@ describe('transcriptRows', () => {
       ['ஆமாம்', 'callee', false],
     ])
   })
+
+  it('marks keys pressed on a menu as neither speech nor translation', () => {
+    const [row] = transcriptRows([
+      { id: 9, owner: 'A', kind: 'pressed', lang: '', text: '12', t: 6 },
+    ])
+    expect(row.pressed).toBe(true)
+    expect(row.translation).toBe(false)
+    expect(row.side).toBe('caller')
+  })
 })

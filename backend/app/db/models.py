@@ -79,6 +79,8 @@ class Call(Base):
     target_lang: Mapped[str] = mapped_column(String(16))
     status: Mapped[str] = mapped_column(String(16), default=IN_PROGRESS)
     end_reason: Mapped[str | None] = mapped_column(String(32), default=None)
+    # What picked up, when Twilio was asked: human | machine_end_beep | ...
+    answered_by: Mapped[str | None] = mapped_column(String(24), default=None)
     started_at: Mapped[datetime] = mapped_column(default=utcnow, index=True)
     answered_at: Mapped[datetime | None] = mapped_column(default=None)
     ended_at: Mapped[datetime | None] = mapped_column(default=None)
