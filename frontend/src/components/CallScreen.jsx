@@ -53,6 +53,9 @@ export function CallScreen({
   // Translation runs a few seconds behind the speaker, so hanging up the
   // moment you stop talking cuts off the end of what the other side hears.
   const stillPlaying = !finished && (session?.far_backlog_s ?? 0) > 1
+  // They are hearing music rather than silence while they wait for your first
+  // translated sentence. Worth saying, because you cannot hear it yourself.
+  const waitMusic = !finished && Boolean(session?.wait_music)
 
   // The keypad is only meaningful once the far end can hear it, and it has no
   // business lingering on screen after the call.
@@ -115,6 +118,11 @@ export function CallScreen({
       <footer className="call__foot">
         {endNote && (
           <p className="call__note" role="status">{endNote}</p>
+        )}
+        {waitMusic && (
+          <p className="call__note call__note--mode" role="status">
+            They are hearing waiting music — start speaking whenever you like.
+          </p>
         )}
         {machine && !finished && (
           <p className="call__note call__note--mode" role="status">{machine}</p>

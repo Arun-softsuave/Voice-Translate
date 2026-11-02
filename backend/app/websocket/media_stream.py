@@ -120,6 +120,13 @@ async def media_stream_endpoint(ws: WebSocket) -> None:
                     return
 
                 translator = await _adopt_or_open_translator(settings, session, pid)
+
+                # The person who answered hears music until the first
+                # translation reaches them, so the wait does not read as a
+                # dead line. Only the phone leg: the caller is watching the
+                # screen and chose the languages.
+                if settings.wait_music and pid is ParticipantId.B:
+                    await session_service.start_wait_music(session, pid)
                 continue
 
             # everything below requires a bound stream

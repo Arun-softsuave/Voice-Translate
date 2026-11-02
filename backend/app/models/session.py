@@ -68,6 +68,14 @@ class Participant:
     digits_out: int = 0                 # keypad tones played into this leg
     suppressed_ms: float = 0.0          # translated speech we chose not to play
 
+    # Waiting music, played into this leg from the moment it connects until the
+    # first translated voice arrives for it. The person's own speaking does not
+    # stop it; only our translated audio does. None once it has been stopped,
+    # and it is never started a second time on the same call.
+    music_task: Any = None              # asyncio.Task while the music is playing
+    music_played_ms: float = 0.0        # how much of it they actually heard
+    music_finished: bool = False        # it has had its turn; never play again
+
     # Latency instrumentation (monotonic seconds; never what was said).
     answered_at: float | None = None    # Twilio: the phone was picked up
     twiml_at: float | None = None       # Twilio fetched our TwiML
@@ -142,6 +150,9 @@ class TranslationSession:
             "end_reason": self.end_reason,
             "ivr_mode": self.ivr_mode,
             "answered_by": self.answered_by,
+            # True while the person who answered is hearing the waiting music,
+            # so the caller knows they are clear to talk rather than guessing.
+            "wait_music": self.b.music_task is not None,
             # Seconds of translated speech still queued at Twilio for the far
             # side: what the caller would cut off by hanging up now.
             "far_backlog_s": round(

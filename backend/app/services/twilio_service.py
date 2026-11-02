@@ -48,6 +48,7 @@ def build_stream_twiml(
     arrives; they come back to us in the stream's `start` message.
     """
     response = VoiceResponse()
+
     connect = Connect()
     stream = connect.stream(url=settings.media_stream_wss_url)
     stream.parameter(name="session_id", value=session_id)

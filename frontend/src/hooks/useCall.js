@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { api, ApiError } from '../lib/api'
 import { State, isLive, reconcile } from '../lib/callState'
+import * as tones from '../lib/tones'
 import { VoiceConnection } from '../lib/twilioDevice'
 
 const POLL_MS = 1500
@@ -34,6 +35,7 @@ export function useCall() {
   const backendStatus = useRef(null)
   // Bumped by reset(), so a start() still in flight knows it was abandoned.
   const attempt = useRef(0)
+  const sounded = useRef(false)   // the answer tone fires once per call
 
   const fail = useCallback((message) => {
     setError(message)
@@ -50,6 +52,25 @@ export function useCall() {
     if (state !== State.CONNECTED && state !== State.TRANSLATING) return
     const id = setInterval(() => setSeconds((s) => s + 1), 1000)
     return () => clearInterval(id)
+  }, [state])
+
+  /**
+   * Sound the moment the line is actually open, and again when it closes.
+   *
+   * Tied to CONNECTED rather than ANSWERED on purpose: between the two, the
+   * far end may still be hearing the "this call is translated" greeting, and
+   * anything said then is dropped. CONNECTED means they can hear you.
+   */
+  useEffect(() => {
+    const live = state === State.CONNECTED || state === State.TRANSLATING
+    if (live && !sounded.current) {
+      sounded.current = true
+      tones.answered()
+    }
+    if (state === State.ENDED && sounded.current) {
+      sounded.current = false
+      tones.ended()
+    }
   }, [state])
 
   /** Poll the backend for the authoritative session view. */
@@ -208,6 +229,7 @@ export function useCall() {
     voice.current?.disconnect()
     voice.current = null
     backendStatus.current = null
+    sounded.current = false
     setState(State.IDLE)
     setSessionId(null)
     setSession(null)

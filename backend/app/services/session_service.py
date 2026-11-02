@@ -31,7 +31,7 @@ from app.models.session import (
     ParticipantId,
     TranslationSession,
 )
-from app.services import history
+from app.services import history, wait_music
 from app.utils import audio
 from app.websocket import twilio_protocol as proto
 
@@ -187,6 +187,12 @@ class SessionRegistry:
 
     def unbind_stream(self, session: TranslationSession, pid: ParticipantId) -> None:
         participant = session.participant(pid)
+        # The leg is going away, so the music has nowhere to play. Cancelled
+        # rather than awaited: this runs on teardown paths that must not block.
+        if participant.music_task is not None:
+            participant.music_task.cancel()
+            participant.music_task = None
+            participant.music_finished = True
         participant.ws = None
         participant.stream_sid = None
         if session.status not in (CallStatus.ENDED, CallStatus.ERROR):
@@ -240,6 +246,10 @@ async def route_audio(
         destination.dropped_no_peer += 1
         return False
 
+    # Their own voice never stops the music; our translated voice always does.
+    if destination.music_task is not None:
+        await stop_wait_music(session, destination.participant_id)
+
     return await _write(destination, payload_b64)
 
 
@@ -255,6 +265,59 @@ async def inject_signal(session: TranslationSession, target: ParticipantId,
     if not destination.connected:
         return False
     return await _write(destination, payload_b64)
+
+
+async def start_wait_music(session: TranslationSession,
+                           target: ParticipantId) -> bool:
+    """Begin the waiting music on one leg. Safe to call when it cannot play."""
+    participant = session.participant(target)
+    if participant.music_task is not None or participant.music_finished:
+        return False
+    if not participant.connected or not wait_music.available():
+        return False
+
+    async def write_frame(frame_b64: str) -> bool:
+        if not participant.connected:
+            return False
+        return await _write(participant, frame_b64)
+
+    participant.music_task = asyncio.create_task(
+        wait_music.play_until_cancelled(
+            write_frame, lambda: playback_backlog_s(participant)),
+        name=f"wait-music-{session.session_id}-{target.value}",
+    )
+    log.info("wait_music_started",
+             extra={"session_id": session.session_id, "participant": target.value})
+    return True
+
+
+async def stop_wait_music(session: TranslationSession,
+                          target: ParticipantId) -> float:
+    """Stop the music and drop whatever of it is still queued at Twilio.
+
+    Returns how long they heard. Clearing matters: up to `LEAD_S` of music is
+    already buffered, and the translation must not wait behind it.
+    """
+    participant = session.participant(target)
+    task = participant.music_task
+    if task is None:
+        return 0.0
+
+    participant.music_task = None
+    participant.music_finished = True       # one turn only, by design
+    task.cancel()
+    try:
+        await task
+    except (asyncio.CancelledError, Exception):      # noqa: BLE001
+        pass
+
+    heard = participant.music_played_ms = max(
+        0.0, participant.queued_ms - participant.played_ms)
+    await clear_playback(session, target)
+    log.info("wait_music_stopped",
+             extra={"session_id": session.session_id,
+                    "participant": target.value})
+    return heard
 
 
 async def _write(destination: Participant, payload_b64: str) -> bool:

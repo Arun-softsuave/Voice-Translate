@@ -107,4 +107,5 @@ class SessionResponse(BaseModel):
     ivr_mode: bool = False
     answered_by: str | None = None
     far_backlog_s: float = 0.0
+    wait_music: bool = False        # they are hearing the waiting music
     participants: dict

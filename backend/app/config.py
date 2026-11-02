@@ -103,6 +103,11 @@ class Settings:
     # told they have reached voicemail. Costs a small fee on every call it is
     # used for, and is occasionally wrong, so it is opt-in.
     detect_machines: bool = False
+
+    # Play music to the person who answers until the first translated voice
+    # reaches them, so the wait does not read as a dead line. Their own
+    # speaking does not stop it; only our translated audio does.
+    wait_music: bool = False
     # Where logs are also written; empty disables the file. Relative paths are
     # relative to the backend folder, wherever uvicorn was started from.
     log_file: str = ""
@@ -217,6 +222,7 @@ def get_settings() -> Settings:
         log_level=_opt("LOG_LEVEL", "INFO").upper(),
         ring_timeout_s=int(_opt("RING_TIMEOUT_S", "60") or 60),
         detect_machines=_bool("DETECT_MACHINES", False),
+        wait_music=_bool("WAIT_MUSIC", False),
         log_file=_log_file(),
         allowed_destination_prefixes=_destinations(),
         database_path=_database_path(),
