@@ -302,20 +302,27 @@ async def tick_gap_music(session: TranslationSession, now: float) -> None:
     `last_speech_out_at` only moves for audio above the speech threshold, so
     filler does not touch it. It is exactly the question worth asking: how
     long since this person last heard a word.
+
+    Someone who has not heard a word yet still gets music: their silence runs
+    from the moment the call connected. Keying this on having heard speech
+    instead left the CALLER with nothing through the whole first gap - they
+    spoke into silence and waited, which is the very moment the music exists
+    for, and the opening music does not reach them because it only plays to
+    the phone.
     """
+    if not (session.a.connected and session.b.connected):
+        return              # still ringing; nothing to fill but the ringtone
+    connected_at = max(session.a.bound_at or 0.0, session.b.bound_at or 0.0)
+
     for pid in (ParticipantId.A, ParticipantId.B):
         participant = session.participant(pid)
-        if participant.music_task is not None or not participant.connected:
+        if participant.music_task is not None:
             continue
         if participant.speaking:
             participant.gap_blocked["speaking"] += 1
             continue                            # never over their own voice
 
-        heard_at = participant.last_speech_out_at
-        if heard_at is None:
-            participant.gap_blocked["nothing_heard_yet"] += 1
-            continue            # the opening music covers the start of a call
-
+        heard_at = participant.last_speech_out_at or connected_at
         quiet_since = max(participant.spoke_at, heard_at)
         if now - quiet_since < GAP_S:
             participant.gap_blocked["too_soon"] += 1

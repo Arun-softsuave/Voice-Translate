@@ -207,6 +207,7 @@ def quiet_for(session, seconds, *, queued=0.0):
     for p in (session.a, session.b):
         p.speaking = False
         p.opening_music_done = True
+        p.bound_at = now - seconds
         p.last_speech_out_at = now - seconds
         p.spoke_at = now - seconds
         p.playout_until = now + queued
@@ -295,13 +296,34 @@ async def test_gap_music_may_play_again_later(call):
 
 
 @pytest.mark.asyncio
-async def test_no_gap_music_before_they_have_heard_anything(call):
-    """The opening music covers the start; this must not pre-empt it."""
+async def test_the_caller_gets_music_in_the_very_first_gap(call):
+    """They have heard nothing yet, and that is exactly when they need it.
+
+    Keying the wait on having heard translated speech left the caller with
+    nothing through the whole first gap: on a real call they were refused
+    1,992 times while the phone had music from the start. The caller speaks
+    into silence and waits - the moment the music exists for.
+    """
     session, _ = call
     now = quiet_for(session, GAP_S + 0.5)
     session.a.last_speech_out_at = session.b.last_speech_out_at = None
+
     await session_service.tick_gap_music(session, now)
-    assert session.a.music_task is None and session.b.music_task is None
+    await settle()
+    assert session.a.music_task is not None,         "the caller was left in silence through the first gap"
+
+
+@pytest.mark.asyncio
+async def test_no_music_while_the_phone_is_still_ringing(call):
+    """Nothing to fill but the ringtone, and the far leg is not up yet."""
+    session, _ = call
+    now = quiet_for(session, GAP_S + 0.5)
+    session.a.last_speech_out_at = session.b.last_speech_out_at = None
+    registry.unbind_stream(session, B)
+
+    await session_service.tick_gap_music(session, now)
+    await settle()
+    assert session.a.music_task is None, "music played before they answered"
 
 
 # --- teardown --------------------------------------------------------------
