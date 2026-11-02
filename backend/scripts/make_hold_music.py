@@ -44,7 +44,14 @@ OPTIONS_DIR = MUSIC_DIR / "options"
 AUDITION_DIR = Path.home() / "Downloads" / "hold_music_options"
 
 RATE = 8000               # what Twilio plays
-PEAK = 0.16               # quiet on purpose - their microphone will hear it
+# Quiet on purpose, and the number that matters is not the peak but how this
+# sits against speech. The detectors call audio "speech" above an RMS of 500.
+# At 0.16 the music measured ~14600, twenty times over; at 0.07 it was still
+# 759, louder than a quiet voice - which is why "quieter" did not sound
+# quieter on a handset. This lands near 270: clearly underneath a
+# conversation, and low enough that its echo in a microphone cannot be
+# mistaken for somebody talking.
+PEAK = 0.025
 WRAP_S = 0.35             # crossfade so the loop seam is inaudible
 
 # Notes, in Hz.

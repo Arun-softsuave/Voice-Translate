@@ -144,6 +144,12 @@ class GeminiTranslateSession:
         # Send the chosen languages as transcription hints; turned off for the
         # rest of the session if the server refuses them.
         self._hints = True
+        # While priming, everything the model produces is its answer to a clip
+        # we fed it rather than to a person, and goes nowhere. It ends on the
+        # model's own `turn_complete`, so nothing has to be guessed; the
+        # deadline is only a backstop for a turn that never completes.
+        self.priming = False
+        self._prime_deadline = 0.0
         self.rtt_ms: int | None = None   # network round trip to Google
         self._rtt_task: asyncio.Task | None = None
 
@@ -256,7 +262,27 @@ class GeminiTranslateSession:
         )
 
     # --- sending ----------------------------------------------------------
+    async def prime_audio(self, payload_b64: str) -> None:
+        """Feed a frame of the priming clip, leaving the window open."""
+        await self._send_audio(payload_b64)
+
     async def append_audio(self, payload_b64: str) -> None:
+        """Feed one base64 µ-law frame of what this person is saying.
+
+        The first such frame is what ends priming. Everything before it can
+        only be our own clip coming back; everything after it can only be the
+        person. Nothing else is a reliable signal: this model never sends
+        `turn_complete`, and a deadline is only noticed when a message
+        happens to arrive - a silent model left priming running for fifteen
+        seconds on a live call and swallowed the caller's whole opening.
+        """
+        if self.priming:
+            self.priming = False
+            log.info("prime_complete",
+                     extra={"label": self.label, "by": "real_audio"})
+        await self._send_audio(payload_b64)
+
+    async def _send_audio(self, payload_b64: str) -> None:
         """Feed one base64 µ-law frame; send once 100 ms has built up."""
         if not self.ready or self._closed:
             return
@@ -341,6 +367,9 @@ class GeminiTranslateSession:
         if content is None:
             return
 
+        if not self._priming_over(bool(content.turn_complete)):
+            return              # our own priming clip coming back at us
+
         heard = content.input_transcription
         if heard is not None and heard.text:
             # First sign the model has heard speech; used only for latency.
@@ -370,6 +399,42 @@ class GeminiTranslateSession:
         ulaw = self._to_twilio(pcm24k)
         if ulaw:
             await self._on_audio(b64_encode(ulaw))
+
+    def start_priming(self, max_seconds: float) -> None:
+        """Discard what comes back until this person's own audio arrives.
+
+        `max_seconds` is a backstop only, and is checked when a message
+        arrives rather than on a clock - the real end is the first frame of
+        their speech, which always comes.
+        """
+        self.priming = True
+        self._prime_deadline = time.monotonic() + max_seconds
+
+    def _priming_over(self, turn_complete: bool) -> bool:
+        if not self.priming:
+            return True
+
+        if turn_complete:
+            self.priming = False
+            log.info("prime_complete", extra={"label": self.label, "by": "turn"})
+            return False        # the completion itself carries nothing we want
+
+        if time.monotonic() > self._prime_deadline:
+            # This model does not send `turn_complete` - on a live call both
+            # legs ended here - so the deadline is what actually stops the
+            # discarding. This message goes with it rather than through: it
+            # arrived while we were still expecting our own clip back, and
+            # letting one such message past played a fragment of the greeting
+            # down the line and cut the waiting music off after 2.4 seconds.
+            #
+            # Only this one message is lost, and only on a leg primed while
+            # the phone is still ringing, where there is nobody to hear it.
+            self.priming = False
+            log.info("prime_complete",
+                     extra={"label": self.label, "by": "timeout"})
+            return False
+
+        return False
 
     async def _transcript(self, direction: str, text: str) -> None:
         if self._on_transcript is not None:

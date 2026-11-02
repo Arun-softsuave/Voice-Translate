@@ -27,6 +27,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 from app.config import get_settings
 from app.models.session import CallStatus, ParticipantId
 from app.services import history, session_service
+from app.services import greetings, scripts
 from app.services.captions import HEARD, SPOKE
 from app.services.gemini_service import GeminiTranslateSession
 from app.services.latency import MARK_PREFIX, SPEECH_RMS
@@ -34,6 +35,7 @@ from app.services.realtime_service import RealtimeTranslator
 from app.services.session_service import registry
 from app.services.translate_service import TranslateSession
 from app.services.translator import Translator
+from app.utils import audio as audio_utils
 from app.utils.audio import b64_decode
 from app.utils.vad import BargeInDetector, SpeechDetector, frame_rms
 from app.websocket import twilio_protocol as proto
@@ -50,6 +52,15 @@ SILENCE_BACKLOG_S = 0.15
 # ...except a pause this soon after translated speech, which is part of the
 # speech (a gap between phrases) and must keep its length.
 PAUSE_KEEP_S = 0.6
+# A second of known-language speech, fed to the model before the call starts,
+# so its one-shot guess at the source language is made on the right evidence.
+PRIME_FRAMES = 50               # 50 x 20 ms of speech
+# ...followed by silence, so the model sees the turn END. Without it the clip
+# sits in its buffer, joins onto the start of the caller's real speech, and is
+# answered seconds later - on a live call that put "This call" into the phone
+# 9.5 s after the clip was sent, long after the window had properly closed.
+PRIME_HUSH_FRAMES = 75          # 1.5 s
+PRIME_MAX_S = 6.0               # backstop only: the model's own turn ends it
 
 
 async def media_stream_endpoint(ws: WebSocket) -> None:
@@ -318,6 +329,8 @@ async def media_stream_endpoint(ws: WebSocket) -> None:
                     # fired, which is otherwise invisible from the outside.
                     "music_s": round(participant.music_total_ms / 1000, 1),
                     "gap_blocked": dict(participant.gap_blocked),
+                    "heard_lines": participant.heard_lines,
+                    "wrong_script_lines": participant.wrong_script_lines,
                 },
             )
             registry.unbind_stream(session, pid)
@@ -398,6 +411,7 @@ async def _open_translator(settings, session, pid: ParticipantId):
         session.captions.add(pid, HEARD if direction == "in" else SPOKE, text)
         if direction == "in":
             tracker.heard(time.monotonic())
+            _check_script(session, pid, speaker.language, text)
 
     backend = translator_class(settings)
     translator = backend(
@@ -430,7 +444,61 @@ async def _open_translator(settings, session, pid: ParticipantId):
     )
 
     speaker.ready_at = time.monotonic()
+    # Only the caller's leg. Its translator opens while the phone is still
+    # ringing, so the clip and whatever the model makes of it land in a window
+    # where the far leg is not connected and nothing can be played to anyone.
+    # The phone's own translator has no such window - it opens about a second
+    # before its stream binds - and priming it bought nothing: the fault being
+    # fixed is the caller's own transcript, and the phone's language here is
+    # English, which no script check can judge anyway.
+    if pid is ParticipantId.A:
+        await _prime_language(session, pid, speaker, translator)
     return translator
+
+
+async def _prime_language(session, pid, speaker, translator) -> None:
+    """Give the session a sentence of the right language before anyone speaks.
+
+    Gemini decides what language it is listening to from the first thing it
+    hears, and keeps that decision for the whole session: one production call
+    was transcribed in Telugu from first line to last because it opened with
+    "Hello Pradeep, my name is Srikanth" - names and loanwords, with no Tamil
+    grammar to grip. The next call, opening with plainly Tamil speech, was
+    right throughout.
+
+    So we choose what it hears first. The clip is the waiting-room greeting in
+    the speaker's own language, which is real synthesised speech in that
+    language and already shipped.
+
+    It happens while the translator is being prepared, before the stream has
+    bound, so there is normally nobody to talk over. Whatever the model makes
+    of it is thrown away, and the throwing-away ends on the model's own
+    `turn_complete` rather than after a guessed number of seconds - a guess
+    would either leak a stray greeting into the call or swallow the first
+    thing somebody said.
+    """
+    clip = greetings.frames(speaker.language)
+    start = getattr(translator, "start_priming", None)
+    if not clip or start is None:
+        return                      # only the backend that detects languages
+
+    hush = audio_utils.b64_encode(audio_utils.ulaw_silence(20))
+    start(PRIME_MAX_S)
+    try:
+        for frame in clip[:PRIME_FRAMES]:
+            await translator.prime_audio(frame)   # not append: that ends it
+        for _ in range(PRIME_HUSH_FRAMES):
+            await translator.prime_audio(hush)
+    except Exception:                                       # noqa: BLE001
+        translator.priming = False
+        log.warning("prime_failed", extra={"session_id": session.session_id,
+                                           "participant": pid.value})
+        return
+
+    log.info("prime_sent", extra={"session_id": session.session_id,
+                                  "participant": pid.value,
+                                  "language": speaker.language,
+                                  "frames": min(len(clip), PRIME_FRAMES)})
 
 
 def prewarm_translator(settings, session, pid: ParticipantId) -> None:
@@ -501,6 +569,28 @@ def _skip_filler(hearer, now: float) -> bool:
         return False
     recent = hearer.last_speech_out_at
     return recent is None or now - recent > PAUSE_KEEP_S
+
+
+def _check_script(session, pid, language: str, text: str) -> None:
+    """Note when a transcript comes back in the wrong language's script.
+
+    Measurement only - the line is still shown. The audio translation is
+    unaffected by this, so suppressing the caption would hide the fault
+    without improving the call.
+    """
+    speaker = session.participant(pid)
+    speaker.heard_lines += 1
+    found = scripts.wrong_script(language, text)
+    if found is None:
+        return
+
+    speaker.wrong_script_lines += 1
+    log.warning(
+        "transcript_wrong_script",
+        extra={"session_id": session.session_id, "participant": pid.value,
+               "expected": scripts.script_for(language), "found": found,
+               "language": language},
+    )
 
 
 # --- latency logging ----------------------------------------------------------

@@ -461,3 +461,50 @@ def test_a_broken_music_start_cannot_kill_the_call(monkeypatch):
                         "a broken music start took the call down with it"
     finally:
         registry.remove(session.session_id)
+
+
+# --- what the phone user hears on answering --------------------------------
+
+@pytest.mark.asyncio
+async def test_the_opening_music_is_not_cut_short_by_filler(call):
+    """It must last until a real translated sentence arrives, not until the
+    first thing the model emits.
+
+    On a live call the opening music stopped 2.4 seconds after it began: a
+    priming clip's translation was routed to the phone and treated as speech.
+    Anything below the speech threshold - filler, or our own clip coming
+    back - must leave it playing.
+    """
+    session, sockets = call
+    await session_service.start_wait_music(session, B, opening=True)
+    await settle()
+
+    for _ in range(10):
+        await session_service.route_audio(session, A, speech_frame(),
+                                          is_speech=False)
+    await settle()
+    assert session.b.music_task is not None, \
+        "the opening music was cut short by something that was not speech"
+
+    await session_service.route_audio(session, A, speech_frame())
+    await settle()
+    assert session.b.music_task is None, "real speech should have ended it"
+
+
+def test_the_music_sits_below_the_level_that_counts_as_speech():
+    """Twice it was shipped loud enough to compete with a voice: at RMS 14600
+    and then 759, against a speech threshold of 500. On a handset that is not
+    background music, it is a second speaker.
+    """
+    import math
+
+    from app.services.latency import SPEECH_RMS
+
+    pcm = audio.ulaw_to_pcm16(wait_music.MUSIC_FILE.read_bytes())
+    samples = [int.from_bytes(pcm[i:i + 2], "little", signed=True)
+               for i in range(0, len(pcm), 2)]
+    rms = math.sqrt(sum(s * s for s in samples) / len(samples))
+
+    assert rms < SPEECH_RMS, (
+        f"the music measures {rms:.0f} against a speech threshold of "
+        f"{SPEECH_RMS:.0f} - regenerate it with a lower PEAK")

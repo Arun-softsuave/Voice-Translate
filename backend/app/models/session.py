@@ -87,6 +87,12 @@ class Participant:
     # Why gap music did not start, counted per reason and logged at stream
     # close. A call where no music played is otherwise silent about why.
     gap_blocked: Counter = field(default_factory=Counter, repr=False)
+    # Transcript lines of this person's speech, and how many of them came
+    # back written in the wrong script. Gemini detects the source language
+    # rather than being told it, and on a bad detection the whole call is
+    # transcribed in another language while the audio stays correct.
+    heard_lines: int = 0
+    wrong_script_lines: int = 0
 
     # Latency instrumentation (monotonic seconds; never what was said).
     answered_at: float | None = None    # Twilio: the phone was picked up

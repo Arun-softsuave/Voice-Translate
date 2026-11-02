@@ -146,6 +146,72 @@ time - background noise alone keeps a speech detector awake every few seconds.
 The one-off music above is what actually works, and being a one-off is what
 keeps it simple enough to reason about.
 
+## When the transcript comes back in the wrong language
+
+Gemini is told what to **speak** - `translation_config.target_language_code` is
+a setting, and the audio it produces is reliably correct. It is never told what
+it is **hearing**: the source language is detected, and `language_codes` is a
+hint it may overrule. On 8 kHz phone audio it sometimes does, and then the
+whole call is transcribed in another language while the translated audio stays
+perfectly correct. Two production calls six minutes apart, same languages:
+
+    call 79   hello Pradeep, my name is Srikanth   -> Telugu, every line
+    call 80   naan pesurathu kekkutha?             -> Tamil, every line
+
+The decision is made on the first utterance and everything follows it. Call 79
+opened with names and English loanwords; there was no Tamil grammar to grip.
+
+Two things work against that.
+
+**Priming.** Before the call, the **caller's** session is fed about a second
+of real speech in their own language - the clips `scripts/make_greetings.py`
+generates. Whatever the model makes of the clip is thrown away.
+
+Only the caller's leg. Its translator opens while the phone is still ringing,
+so the clip and the model's answer to it land in a window where the far leg is
+not connected and nothing can be played to anyone. The phone's translator has
+no such window - it opens about a second before its stream binds - and priming
+it leaked a fragment of the greeting down the line and cut the waiting music
+off after 2.4 seconds. A language with no clip is simply not primed.
+
+**The discarding ends on the caller's own first frame of audio**, which is the
+only signal that always arrives. Everything before it can only be our clip
+coming back; everything after it can only be the person.
+
+The clip is sent with **1.5 seconds of silence after it**, so the model sees
+the turn end and answers while the phone is still ringing. Without that the
+clip sits in its buffer, joins onto the start of the caller's real speech and
+is answered seconds later: on a live call that put the clip's own translation,
+"This call", into the phone 9.5 s after it was sent - after the window had
+properly closed, cutting the waiting music short.
+
+Two earlier end conditions both failed in production and are worth knowing
+about. `turn_complete` is never sent by this model. A deadline is only noticed
+when a message happens to arrive, so a silent model left priming running for
+15.3 seconds against a 6-second cap: the caller's whole opening was discarded
+(`heard_lines: 0`), and the clip's own translation reached the phone as
+"This call", cutting the waiting music off after 2.6 seconds.
+
+**Checking.** Each language has its own Unicode block, so a transcript in the
+wrong one is wrong with certainty - arithmetic, not inference. Every line is
+checked against the language the caller chose and a mismatch is logged. The
+line is still shown: the audio is unaffected, so hiding the caption would hide
+the fault without improving the call.
+
+Latin-script languages cannot be told apart this way - English, Spanish and
+French share an alphabet - so those lines are never judged rather than being
+silently passed.
+
+### Measuring it
+
+    cd backend
+    ..\.venv\Scripts\python.exe scripts/script_report.py
+    ..\.venv\Scripts\python.exe scripts/script_report.py --since 2026-11-02
+
+One line per call: whether it was primed, how many transcript lines it
+produced, and how many came back in the wrong language. Judge a change on that
+rather than on whether the last call happened to go well.
+
 ## Before sharing the link
 
 Sign-in keeps strangers from placing calls. Cloudflare Access (Zero Trust →

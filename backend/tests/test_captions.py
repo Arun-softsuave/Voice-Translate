@@ -383,6 +383,11 @@ async def test_caption_text_never_reaches_the_logs(caplog, monkeypatch, owner):
     s = registry.create(source_language="en", target_language="es", user_id=owner.id)
     try:
         translator = await media_stream._open_translator(settings, s, A)
+        # A session is primed with a clip of the speaker's language before the
+        # call, and discards its own answer to it. A real server ends that
+        # turn; this fake has to say so too, or everything below is swallowed.
+        wires[0].push({"serverContent": {"turnComplete": True}})
+        await asyncio.sleep(0)
         wires[0].push({"serverContent": {"inputTranscription": {"text": "MYSECRETPIN 4821"}}})
         wires[0].push({"serverContent": {"outputTranscription": {"text": "MIPINSECRETO 4821"}}})
         await asyncio.sleep(0.05)
