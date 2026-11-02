@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -72,9 +73,20 @@ class Participant:
     # first translated voice arrives for it. The person's own speaking does not
     # stop it; only our translated audio does. None once it has been stopped,
     # and it is never started a second time on the same call.
-    music_task: Any = None              # asyncio.Task while the music is playing
-    music_played_ms: float = 0.0        # how much of it they actually heard
-    music_finished: bool = False        # it has had its turn; never play again
+    # Waiting music, played into this leg from the moment it connects until
+    # the first translated voice arrives for it. The person's own speaking
+    # does NOT stop it - "hello?" into a silent line is exactly who it is
+    # for. Only our translated audio stops it, and it never plays twice.
+    music_task: Any = None              # asyncio.Task while music is playing
+    music_is_opening: bool = False      # which kind is playing right now
+    opening_music_done: bool = False    # the opening has had its one turn
+    music_played_ms: float = 0.0        # how much of the last stretch they heard
+    music_total_ms: float = 0.0         # all of it, for the closing log line
+    speaking: bool = False              # they are talking at this instant
+    spoke_at: float = 0.0               # when they were last heard talking
+    # Why gap music did not start, counted per reason and logged at stream
+    # close. A call where no music played is otherwise silent about why.
+    gap_blocked: Counter = field(default_factory=Counter, repr=False)
 
     # Latency instrumentation (monotonic seconds; never what was said).
     answered_at: float | None = None    # Twilio: the phone was picked up

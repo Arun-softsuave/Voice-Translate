@@ -126,7 +126,15 @@ async def media_stream_endpoint(ws: WebSocket) -> None:
                 # dead line. Only the phone leg: the caller is watching the
                 # screen and chose the languages.
                 if settings.wait_music and pid is ParticipantId.B:
-                    await session_service.start_wait_music(session, pid)
+                    # Never let the music break the call. It is a nicety; a
+                    # fault in it once crashed the phone leg the instant it
+                    # bound, losing the audio and the transcript with it.
+                    try:
+                        await session_service.start_wait_music(session, pid, opening=True)
+                    except Exception:                           # noqa: BLE001
+                        log.exception("wait_music_failed",
+                                      extra={"session_id": session.session_id,
+                                             "participant": pid.value})
                 continue
 
             # everything below requires a bound stream
@@ -164,8 +172,23 @@ async def media_stream_endpoint(ws: WebSocket) -> None:
                 if speech.feed_level(level):
                     # The detector decides a few frames in; date the start back.
                     tracker.speech_started(now - speech.onset_frames * FRAME_S)
+                    # Their own voice beats their own music. The opening music
+                    # is spared: "hello?" into a silent line is who it is for.
+                    await session_service.stop_gap_music(session, pid)
                 elif was_speaking and not speech.speaking:
                     tracker.speech_stopped(now - speech.hangover_frames * FRAME_S)
+
+                participant.speaking = speech.speaking
+                if speech.speaking:
+                    participant.spoke_at = now
+                elif settings.wait_music:
+                    # A nicety: never let it cost the call.
+                    try:
+                        await session_service.tick_gap_music(session, now)
+                    except Exception:                           # noqa: BLE001
+                        log.exception("wait_music_failed",
+                                      extra={"session_id": session.session_id,
+                                             "participant": pid.value})
 
                 # Talking over the translation they are hearing cuts it, but
                 # only on sustained, clearly direct speech: not a cough, line
@@ -290,6 +313,11 @@ async def media_stream_endpoint(ws: WebSocket) -> None:
                     "barge_ins_ignored": barge.ignored,
                     "silence_skipped_ms": round(participant.silence_skipped_ms),
                     "audio_s_in": round(participant.frames_in * 20 / 1000, 1),
+                    # How much waiting music this person actually heard. Zero
+                    # on a call where it was expected means the rule never
+                    # fired, which is otherwise invisible from the outside.
+                    "music_s": round(participant.music_total_ms / 1000, 1),
+                    "gap_blocked": dict(participant.gap_blocked),
                 },
             )
             registry.unbind_stream(session, pid)
@@ -356,7 +384,8 @@ async def _open_translator(settings, session, pid: ParticipantId):
             return
 
         await session_service.route_audio(
-            session, pid, audio_b64, echo_mode=settings.echo_mode
+            session, pid, audio_b64, echo_mode=settings.echo_mode,
+            is_speech=is_speech,
         )
         # Latency: when translated *speech* reaches us, plus a mark so Twilio
         # tells us when it has actually been played.

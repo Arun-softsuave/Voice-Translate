@@ -192,7 +192,7 @@ class SessionRegistry:
         if participant.music_task is not None:
             participant.music_task.cancel()
             participant.music_task = None
-            participant.music_finished = True
+            participant.opening_music_done = True
         participant.ws = None
         participant.stream_sid = None
         if session.status not in (CallStatus.ENDED, CallStatus.ERROR):
@@ -231,6 +231,7 @@ async def route_audio(
     payload_b64: str,
     *,
     echo_mode: bool = False,
+    is_speech: bool = True,
 ) -> bool:
     """Play audio produced by `source` into the correct leg.
 
@@ -246,8 +247,11 @@ async def route_audio(
         destination.dropped_no_peer += 1
         return False
 
-    # Their own voice never stops the music; our translated voice always does.
-    if destination.music_task is not None:
+    # Their own voice never stops the music; our translated voice does -
+    # they now have something real to listen to. Only actual speech, though:
+    # the near-silent filler the model streams between phrases would
+    # otherwise cut the music off the instant it started.
+    if is_speech and destination.music_task is not None:
         await stop_wait_music(session, destination.participant_id)
 
     return await _write(destination, payload_b64)
@@ -267,11 +271,70 @@ async def inject_signal(session: TranslationSession, target: ParticipantId,
     return await _write(destination, payload_b64)
 
 
-async def start_wait_music(session: TranslationSession,
-                           target: ParticipantId) -> bool:
-    """Begin the waiting music on one leg. Safe to call when it cannot play."""
+# A silence shorter than this is just someone drawing breath. Filling it
+# would start and stop music every couple of seconds.
+GAP_S = 1.0
+
+
+async def stop_gap_music(session: TranslationSession,
+                         target: ParticipantId) -> None:
+    """End gap music for the person who has started talking.
+
+    Only theirs. The other person is still waiting on a translation, and
+    nobody ever hears the far side's raw voice - only what comes back
+    translated - so music on their line masks nothing.
+    """
     participant = session.participant(target)
-    if participant.music_task is not None or participant.music_finished:
+    if participant.music_task is not None and not participant.music_is_opening:
+        await stop_wait_music(session, target)
+
+
+async def tick_gap_music(session: TranslationSession, now: float) -> None:
+    """Fill a real silence with music, for whoever has nothing to hear.
+
+    Judged on when they last heard real translated SPEECH, not on whether
+    anything is queued for them. That distinction is the whole reason an
+    earlier version never played a single note on a live call: the model
+    streams near-silent filler between phrases, and `_skip_filler` keeps a
+    cushion of it queued on purpose so the line never goes quiet. "Nothing
+    queued" is therefore never true, and could never mean silence.
+
+    `last_speech_out_at` only moves for audio above the speech threshold, so
+    filler does not touch it. It is exactly the question worth asking: how
+    long since this person last heard a word.
+    """
+    for pid in (ParticipantId.A, ParticipantId.B):
+        participant = session.participant(pid)
+        if participant.music_task is not None or not participant.connected:
+            continue
+        if participant.speaking:
+            participant.gap_blocked["speaking"] += 1
+            continue                            # never over their own voice
+
+        heard_at = participant.last_speech_out_at
+        if heard_at is None:
+            participant.gap_blocked["nothing_heard_yet"] += 1
+            continue            # the opening music covers the start of a call
+
+        quiet_since = max(participant.spoke_at, heard_at)
+        if now - quiet_since < GAP_S:
+            participant.gap_blocked["too_soon"] += 1
+            continue
+
+        await start_wait_music(session, pid, opening=False)
+
+
+async def start_wait_music(session: TranslationSession, target: ParticipantId,
+                           *, opening: bool = False) -> bool:
+    """Begin music on one leg. Safe to call when it cannot or should not play.
+
+    The opening music gets one turn per call; gap music may play as often as
+    there are gaps.
+    """
+    participant = session.participant(target)
+    if participant.music_task is not None:
+        return False
+    if opening and participant.opening_music_done:
         return False
     if not participant.connected or not wait_music.available():
         return False
@@ -286,8 +349,10 @@ async def start_wait_music(session: TranslationSession,
             write_frame, lambda: playback_backlog_s(participant)),
         name=f"wait-music-{session.session_id}-{target.value}",
     )
+    participant.music_is_opening = opening
     log.info("wait_music_started",
-             extra={"session_id": session.session_id, "participant": target.value})
+             extra={"session_id": session.session_id, "participant": target.value,
+                    "kind": "opening" if opening else "gap"})
     return True
 
 
@@ -295,28 +360,32 @@ async def stop_wait_music(session: TranslationSession,
                           target: ParticipantId) -> float:
     """Stop the music and drop whatever of it is still queued at Twilio.
 
-    Returns how long they heard. Clearing matters: up to `LEAD_S` of music is
-    already buffered, and the translation must not wait behind it.
+    Clearing matters: up to `LEAD_S` of music is already buffered, and the
+    translation must not wait behind it.
     """
     participant = session.participant(target)
     task = participant.music_task
     if task is None:
         return 0.0
 
+    was_opening = participant.music_is_opening
     participant.music_task = None
-    participant.music_finished = True       # one turn only, by design
+    participant.music_is_opening = False
+    if was_opening:
+        participant.opening_music_done = True   # the opening gets one turn
     task.cancel()
     try:
         await task
-    except (asyncio.CancelledError, Exception):      # noqa: BLE001
+    except BaseException:                       # noqa: BLE001 - cancellation
         pass
 
     heard = participant.music_played_ms = max(
         0.0, participant.queued_ms - participant.played_ms)
+    participant.music_total_ms += heard
     await clear_playback(session, target)
     log.info("wait_music_stopped",
-             extra={"session_id": session.session_id,
-                    "participant": target.value})
+             extra={"session_id": session.session_id, "participant": target.value,
+                    "kind": "opening" if was_opening else "gap"})
     return heard
 
 

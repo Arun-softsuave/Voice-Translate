@@ -26,6 +26,11 @@ os.environ.setdefault("TRANSLATION_BACKEND", "translate")
 os.environ.setdefault("DEMO_MODE", "true")
 os.environ.setdefault("ECHO_MODE", "false")
 os.environ.setdefault("VALIDATE_TWILIO_SIGNATURE", "false")
+# Off by default so the suite does not depend on whether the developer happens
+# to have the music switched on: with it enabled, the first audio a leg
+# receives is music rather than the translation a test is waiting for. The
+# music's own tests turn it on where they need it.
+os.environ.setdefault("WAIT_MUSIC", "false")
 os.environ.setdefault("LOG_LEVEL", "CRITICAL")
 # Tests must never write into the developer's real log file.
 os.environ.setdefault("LOG_FILE", "")
