@@ -54,7 +54,10 @@ SILENCE_BACKLOG_S = 0.15
 PAUSE_KEEP_S = 0.6
 # A second of known-language speech, fed to the model before the call starts,
 # so its one-shot guess at the source language is made on the right evidence.
-PRIME_FRAMES = 50               # 50 x 20 ms of speech
+# The whole clip, which is one short sentence of about 2-3 s. A truncated
+# sample ends mid-word, which is both a worse language sample and a turn the
+# model never sees the end of; the cap is only a guard against a long file.
+PRIME_FRAMES = 250              # 5 s at 20 ms a frame
 # ...followed by silence, so the model sees the turn END. Without it the clip
 # sits in its buffer, joins onto the start of the caller's real speech, and is
 # answered seconds later - on a live call that put "This call" into the phone

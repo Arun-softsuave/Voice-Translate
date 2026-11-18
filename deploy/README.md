@@ -163,9 +163,18 @@ opened with names and English loanwords; there was no Tamil grammar to grip.
 
 Two things work against that.
 
-**Priming.** Before the call, the **caller's** session is fed about a second
-of real speech in their own language - the clips `scripts/make_greetings.py`
-generates. Whatever the model makes of the clip is thrown away.
+**Priming.** Before the call, the **caller's** session is fed one short
+sentence of real speech in their own language - the clips
+`scripts/make_greetings.py` generates, about 2-3 seconds each. Whatever the
+model makes of the clip is thrown away.
+
+The sentence is deliberately short and complete: *"This call is translated."*
+It primes as well as a longer one, finishes its turn sooner - which is what
+keeps the model's answer inside the window where that answer is discarded -
+and, if it ever does escape into the call, says something true and brief. An
+earlier, longer clip reached a phone as "This call" and left the person
+wondering what about it. The exact wording per language is in
+`app/data/greetings/text.json`; change it there and re-run the script.
 
 Only the caller's leg. Its translator opens while the phone is still ringing,
 so the clip and the model's answer to it land in a window where the far leg is

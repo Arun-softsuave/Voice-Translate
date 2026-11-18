@@ -271,7 +271,54 @@ async def test_the_clip_is_followed_by_silence(wires, gemini, session,
     finally:
         await translator2.close()
 
-    assert len(fed) > ms.PRIME_FRAMES, "no silence was sent after the clip"
+    clip = greetings.frames(session.a.language)
     silence = audio.b64_encode(audio.ulaw_silence(20))
+
+    assert len(fed) == len(clip) + ms.PRIME_HUSH_FRAMES,         "the clip was truncated, or no silence followed it"
+    assert fed[:len(clip)] == clip, "the whole clip must be sent, not a part"
     assert fed[-1] == silence, "the priming audio does not end in silence"
-    assert fed.count(silence) >= ms.PRIME_HUSH_FRAMES
+    assert fed[len(clip):] == [silence] * ms.PRIME_HUSH_FRAMES
+
+
+# --- the clip itself -------------------------------------------------------
+
+def test_the_clip_is_one_short_sentence():
+    """Short for two reasons, and both were learned the hard way.
+
+    A short sentence finishes its turn sooner, which is what keeps the
+    model's answer to it inside the window where that answer is discarded.
+    And if it ever does escape into the call, a complete short sentence says
+    something true: an earlier, longer clip reached a phone as "This call"
+    and left the person wondering what about it.
+    """
+    from app.utils import audio
+
+    for language in ("ta", "en", "hi", "es"):
+        clip = greetings.frames(language)
+        seconds = len(clip) * greetings.FRAME_MS / 1000
+        assert 0.8 <= seconds <= 4.0, \
+            f"{language}: {seconds:.1f}s - regenerate with a shorter MASTER"
+        assert len(audio.b64_decode(clip[0])) == greetings.FRAME_BYTES
+
+
+def test_the_whole_clip_is_sent_not_a_fragment():
+    """A truncated sample ends mid-word: a worse language sample, and a turn
+    whose end the model never sees."""
+    from app.websocket import media_stream
+
+    for language in ("ta", "en", "hi", "es"):
+        assert len(greetings.frames(language)) <= media_stream.PRIME_FRAMES, \
+            f"{language}: the clip is longer than the cap and would be cut"
+
+
+def test_what_the_clip_says_is_recorded_alongside_it():
+    """So anyone can read what is being fed into a live call without
+    listening to 76 audio files."""
+    import json
+
+    text = json.loads((greetings.CLIP_DIR / "text.json")
+                      .read_text(encoding="utf-8"))
+    for language in greetings.languages():
+        if language in text:
+            assert text[language].strip(), f"{language}: blank wording"
+    assert "translated" in text["en"].lower()

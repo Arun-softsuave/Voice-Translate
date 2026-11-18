@@ -45,9 +45,19 @@ from app.utils import audio, resample             # noqa: E402
 OUT_DIR = Path(__file__).resolve().parent.parent / "app" / "data" / "greetings"
 TEXT_FILE = OUT_DIR / "text.json"
 
-# Short on purpose: it competes with the first thing either person says, and
-# whatever has not played by then is cut off.
-MASTER = "This call is being translated. Please pause after speaking."
+# Short on purpose, and for two reasons now.
+#
+# These clips are no longer spoken down the line; they prime a translator, so
+# that its one-shot guess at the source language is made on a second of the
+# right language rather than on whatever the caller happens to say first.
+#
+# A short, complete sentence primes just as well as a long one, finishes its
+# turn sooner - which is what keeps the model's answer to it inside the window
+# where that answer is discarded - and, if it ever does escape into the call,
+# says something true and brief rather than half of a longer thought. An
+# earlier, longer clip reached a phone as "This call" and left the person
+# wondering what about it.
+MASTER = "This call is translated."
 
 TEXT_MODEL = "gemini-3.5-flash"   # 2.5-flash is retired for new keys
 TTS_MODEL = "gemini-2.5-flash-preview-tts"
